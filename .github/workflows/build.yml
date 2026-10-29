@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince Master (LED Status Monitor, Battery Bypass & Full Tools)
+name: Build OpenWrt Vince Master MSM8953 (Fixed Target)
 
 on:
   push:
@@ -45,19 +45,17 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # Clone aplikasi LuCI khusus
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Inject LED Monitor, Battery Bypass & Complete Auto Config
+      - name: Inject LED Monitor, Battery Bypass & Lock Target MSM8953
         run: |
           cd openwrt
           mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
 
-          # 1. Skrip Daemon LED Status Monitor (Latar Belakang)
+          # 1. LED Status Monitor Daemon
           cat << 'LED_SCRIPT' > files/usr/bin/led-status-monitor.sh
           #!/bin/sh
-
           LED="/sys/class/leds/white:status/brightness"
           [ ! -f "$LED" ] && LED=$(ls /sys/class/leds/*/brightness 2>/dev/null | head -n 1)
 
@@ -73,22 +71,16 @@ jobs:
           }
 
           while true; do
-              # Cek status Wi-Fi AP
               AP_ACTIVE=$(ubus call network.wireless status 2>/dev/null | grep -c '"up": true')
-              
-              # Cek status WAN SIM 4G
               SIM_ACTIVE=$(ifconfig wan_sim 2>/dev/null | grep -c 'inet addr')
 
               if [ "$AP_ACTIVE" -gt 0 ]; then
-                  # Kode 3: Hotspot Aktif & Siap (Kedip 3x)
                   blink 3 0.15
                   sleep 1.5
               elif [ "$SIM_ACTIVE" -gt 0 ]; then
-                  # Kode 1: Connecting/Searching 4G SIM (Kedip 1x)
                   blink 1 0.2
                   sleep 1.5
               else
-                  # Kode 5: Warning / Searching (Kedip 5x Cepat)
                   blink 5 0.1
                   sleep 1
               fi
@@ -96,22 +88,20 @@ jobs:
           LED_SCRIPT
           chmod +x files/usr/bin/led-status-monitor.sh
 
-          # 2. Layanan Init LED Status Monitor
+          # 2. Layanan Init LED Monitor
           cat << 'LED_SERVICE' > files/etc/init.d/led-status
           #!/bin/sh /etc/rc.common
           START=99
-
           start() {
               /usr/bin/led-status-monitor.sh &
           }
           LED_SERVICE
           chmod +x files/etc/init.d/led-status
 
-          # 3. Skrip Battery Bypass
+          # 3. Battery Bypass Service
           cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
           #!/bin/sh /etc/rc.common
           START=99
-
           start() {
               if [ -d /sys/class/power_supply/battery ]; then
                   echo 0 > /sys/class/power_supply/battery/charging_enabled 2>/dev/null || true
@@ -131,8 +121,6 @@ jobs:
           # 5. Skrip uci-defaults Auto Setup
           cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
-
-          # Wi-Fi Hotspot
           wifi config
           uci set wireless.radio0.disabled='0'
           uci set wireless.default_radio0.mode='ap'
@@ -141,7 +129,6 @@ jobs:
           uci commit wireless
           wifi reload
 
-          # Modem / SIM Card
           uci set network.wan_sim=interface
           uci set network.wan_sim.proto='modemmanager'
           uci set network.wan_sim.device='/sys/devices/platform/soc/78b7000.usb/modem'
@@ -149,22 +136,18 @@ jobs:
           uci set network.wan_sim.auth='none'
           uci commit network
 
-          # ZRAM Swap 1GB
           uci set system.@system[0].zram_size_mb='1024'
           uci commit system
 
-          # Storage Mount
           uci set fstab.@global[0].anon_mount='1'
           uci set fstab.@global[0].auto_mount='1'
           uci set fstab.@global[0].auto_swap='1'
           uci commit fstab
 
-          # Enable Services
           /etc/init.d/battery-bypass enable
           /etc/init.d/battery-bypass start
           /etc/init.d/led-status enable
           /etc/init.d/led-status start
-
           exit 0
           CUSTOM_EOF
           chmod +x files/etc/uci-defaults/99-vince-custom
@@ -178,7 +161,12 @@ jobs:
           }
           NFT_EOF
 
-          # 7. Menyusun Pilihan Paket Lengkap ke .config
+          # 7. KUNCI TARGET KHUSUS MSM8953 (QUALCOMM SNAPDRAGON 625 VINCE)
+          echo "CONFIG_TARGET_msm89xx=y" > .config
+          echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
+          echo "CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
+
+          # Opsi Kompilasi & Paket
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
 
