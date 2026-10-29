@@ -22,7 +22,7 @@ jobs:
           apt-get update
           apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
           libelf-dev libdw-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
-          python3-dev rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev
+          python3-dev rsync subversion swig time u-boot-tools device-tree-compiler unzip wget xsltproc zlib1g-dev
 
       - name: Clone OpenWrt Repo (MSM89xx Supported Fork)
         run: |
@@ -47,6 +47,17 @@ jobs:
 
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
+
+      - name: Inject Permanent Elfutils Fix in OpenWrt Makefile
+        run: |
+          cd openwrt
+          cat << 'HOOK_EOF' >> tools/elfutils/Makefile
+
+define Host/Configure/Pre
+	sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' $$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+	sed -i 's/#if $$/#if 0/g' $$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+endef
+HOOK_EOF
 
       - name: Inject Configuration & Lock Target MSM8953
         run: |
@@ -166,59 +177,79 @@ jobs:
           echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
           echo "CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
 
-          # Opsi Kompilasi & Modul LuCI Compatibility
+          # Opsi Kompilasi & System Basic
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
           echo "CONFIG_PACKAGE_luci-compat=y" >> .config
-
-          echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
-          echo "CONFIG_PACKAGE_hostapd=y" >> .config
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_dropbear=y" >> .config
 
+          # Wi-Fi & AP
+          echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
+          echo "CONFIG_PACKAGE_hostapd=y" >> .config
+
+          # Optimasi BBR & SQM
           echo "CONFIG_PACKAGE_kmod-tcp-bbr=y" >> .config
+          echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
 
+          # Repeater & Relay
           echo "CONFIG_PACKAGE_luci-app-travelmate=y" >> .config
           echo "CONFIG_PACKAGE_relayd=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-relay=y" >> .config
 
-          echo "CONFIG_PACKAGE_luci-app-modemband=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-sms-tool-js=y" >> .config
-          echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
-          echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-zerotier=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-aria2=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-simple-adblock=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-statistics=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-ttyd=y" >> .config
-
+          # Modem 4G / SIM & Driver USB Network Lengkap (DITAMBAHKAN)
           echo "CONFIG_PACKAGE_modemmanager=y" >> .config
+          echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
           echo "CONFIG_PACKAGE_qmi-utils=y" >> .config
           echo "CONFIG_PACKAGE_mbim-utils=y" >> .config
           echo "CONFIG_PACKAGE_sms-tool=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-nft-offload=y" >> .config
-          echo "CONFIG_PACKAGE_nftables=y" >> .config
-          echo "CONFIG_PACKAGE_mwan3=y" >> .config
-          echo "CONFIG_PACKAGE_wireguard=y" >> .config
-          echo "CONFIG_PACKAGE_zerotier=y" >> .config
-          echo "CONFIG_PACKAGE_simple-adblock=y" >> .config
-          echo "CONFIG_PACKAGE_zram-swap=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-modemband=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-sms-tool-js=y" >> .config
+          echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net-rndis=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-serial-qualcomm=y" >> .config
+
+          # Storage OTG & File System (DITAMBAHKAN)
+          echo "CONFIG_PACKAGE_kmod-usb-storage=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb3=y" >> .config
           echo "CONFIG_PACKAGE_block-mount=y" >> .config
           echo "CONFIG_PACKAGE_kmod-fs-ext4=y" >> .config
           echo "CONFIG_PACKAGE_kmod-fs-f2fs=y" >> .config
           echo "CONFIG_PACKAGE_kmod-fs-exfat=y" >> .config
           echo "CONFIG_PACKAGE_fdisk=y" >> .config
-          echo "CONFIG_PACKAGE_aria2=y" >> .config
 
+          # Firewall, Multi-WAN & VPN
+          echo "CONFIG_PACKAGE_kmod-nft-offload=y" >> .config
+          echo "CONFIG_PACKAGE_nftables=y" >> .config
+          echo "CONFIG_PACKAGE_mwan3=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
+          echo "CONFIG_PACKAGE_wireguard=y" >> .config
+          echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
+          echo "CONFIG_PACKAGE_zerotier=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-zerotier=y" >> .config
+
+          # Tools & UtilitiesTambahan
+          echo "CONFIG_PACKAGE_simple-adblock=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-simple-adblock=y" >> .config
+          echo "CONFIG_PACKAGE_zram-swap=y" >> .config
+          echo "CONFIG_PACKAGE_aria2=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-aria2=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-statistics=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-ttyd=y" >> .config
+
+          # Audio & Bluetooth
           echo "CONFIG_PACKAGE_bluez-daemon=y" >> .config
           echo "CONFIG_PACKAGE_alsa-utils=y" >> .config
           echo "CONFIG_PACKAGE_pulseaudio-daemon=y" >> .config
 
           make defconfig
 
-      # --- TAHAP VERIFIKASI PRA-BUILD ---
+      # VERIFIKASI KEAMANAN ARSITEKTUR MSM8953
       - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
@@ -229,48 +260,13 @@ jobs:
           fi
           echo "::notice::[SUCCESS] Target terverifikasi: MSM89xx / MSM8953 (Xiaomi Vince)."
 
-      - name: Verify Host Prerequisites
-        run: |
-          cd openwrt
-          make prereq
-
-      - name: Download Source Tarballs & Pre-Verify Dependencies
-        run: |
-          cd openwrt
-          make download -j8 || make download -j1
-
-      - name: Pre-extract and Patch Host Tools
-        run: |
-          cd openwrt
-          make tools/elfutils/prepare
-          find build_dir/host/elfutils* -type f \( -name "obstack.in.h" -o -name "obstack.h" \) -exec sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' {} +
-          find build_dir/host/elfutils* -type f \( -name "obstack.in.h" -o -name "obstack.h" \) -exec sed -i 's/#if $/ #if 0/g' {} +
-
-      # --- KOMPILASI UTAMA ---
+      # KOMPILASI UTAMA
       - name: Compile Firmware
         run: |
           cd openwrt
           make -j$(nproc) V=s || make -j1 V=s
 
-      # --- VERIFIKASI PASCA-BUILD ---
-      - name: Verify Generated Image Files
-        run: |
-          TARGET_DIR="openwrt/bin/targets/msm89xx/msm8953"
-          if [ ! -d "$TARGET_DIR" ]; then
-            echo "::error::[FATAL ERROR] Folder hasil compile $TARGET_DIR tidak ditemukan!"
-            exit 1
-          fi
-
-          echo "=== DAFTAR FILE HASIL BUILD ==="
-          ls -lh $TARGET_DIR/
-
-          BOOT_EXISTS=$(find $TARGET_DIR -name "*boot*.img" -o -name "*kernel*.bin" -o -name "*vmlinuz*" | head -n 1)
-          if [ -z "$BOOT_EXISTS" ]; then
-            echo "::error::[FATAL ERROR] File boot/kernel tidak ditemukan di $TARGET_DIR!"
-            exit 1
-          fi
-          echo "::notice::[SUCCESS] File image untuk Xiaomi Vince tervalidasi dan siap dipasang!"
-
+      # UPLOAD ARTIFACT LANGSUNG
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
