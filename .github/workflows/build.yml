@@ -48,10 +48,20 @@ jobs:
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Fix Host Tools (Elfutils Obstack Macro Fix)
+      - name: Inject Patch for Host Tools (Elfutils Obstack Fix)
         run: |
           cd openwrt
-          find tools/elfutils/ -type f -name "*.in" -o -name "*.h" -o -name "Makefile*" | xargs sed -i 's/@HAVE_OBSTACK_PRINTF@/0/g' 2>/dev/null || true
+          mkdir -p tools/elfutils/patches
+          cat << 'PATCH_EOF' > tools/elfutils/patches/990-fix-obstack-empty-if.patch
+--- a/libgnu/obstack.in.h
++++ b/libgnu/obstack.in.h
+@@ -140,7 +140,7 @@
+    (void) 0; })
+ 
+-#if @HAVE_OBSTACK_PRINTF@
++#if 0
+ # ifdefine HAVE_OBSTACK_PRINTF
+PATCH_EOF
 
       - name: Inject Configuration & Lock Target MSM8953
         run: |
