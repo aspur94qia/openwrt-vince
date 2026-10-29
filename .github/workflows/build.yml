@@ -33,25 +33,28 @@ jobs:
       - name: Inject Triple-Hook Fix for Elfutils Obstack Error
         run: |
           cd openwrt
-          cat << 'HOOK_EOF' >> tools/elfutils/Makefile
+          python3 -c "
+          hook = '''
+          define Host/Configure/Pre/FixObstack
+          \tsed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+          endef
 
-define Host/Configure/Pre/FixObstack
-	sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
-	sed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
-endef
+          define Host/Configure/Post/FixObstack
+          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
+          endef
 
-define Host/Configure/Post/FixObstack
-	sed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
-endef
+          define Host/Compile/Pre/FixObstack
+          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
+          endef
 
-define Host/Compile/Pre/FixObstack
-	sed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
-endef
-
-Hooks/HostConfigure/Pre += Host/Configure/Pre/FixObstack
-Hooks/HostConfigure/Post += Host/Configure/Post/FixObstack
-Hooks/HostCompile/Pre += Host/Compile/Pre/FixObstack
-HOOK_EOF
+          Hooks/HostConfigure/Pre += Host/Configure/Pre/FixObstack
+          Hooks/HostConfigure/Post += Host/Configure/Post/FixObstack
+          Hooks/HostCompile/Pre += Host/Compile/Pre/FixObstack
+          '''
+          with open('tools/elfutils/Makefile', 'a') as f:
+              f.write(hook)
+          "
 
       - name: Update & Install Feeds + Custom LuCI Apps
         run: |
