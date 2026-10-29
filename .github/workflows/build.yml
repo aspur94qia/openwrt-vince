@@ -24,10 +24,11 @@ jobs:
           libelf-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev
 
-      - name: Clone OpenWrt Repo
+      # MENGGUNAKAN REPO FORK KHUSUS TARGET MSM89XX / SNAPDRAGON
+      - name: Clone OpenWrt Repo (MSM89xx Supported Fork)
         run: |
           rm -rf openwrt
-          git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
+          git clone --depth 1 https://github.com/lkiuyu/immortalwrt.git openwrt
 
       - name: Cache OpenWrt Downloads & Staging Tools
         uses: actions/cache@v4
@@ -217,7 +218,7 @@ jobs:
 
           make defconfig
 
-      # --- PERINGATAN DAN VALIDASI TARGET ARSITEKTUR ---
+      # VALIDASI SAFETY GUARD ARSITEKTUR
       - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
@@ -225,7 +226,6 @@ jobs:
             echo "::error::[FATAL ERROR] Arsitektur salah! Target bukan MSM89xx/MSM8953 (Xiaomi Vince)."
             echo "Target terdeteksi di .config:"
             grep "CONFIG_TARGET_" .config | head -n 5
-            echo "Membatalkan build otomatis untuk menghemat waktu."
             exit 1
           fi
           echo "::notice::[SUCCESS] Target terverifikasi: MSM89xx / MSM8953 (Xiaomi Vince)."
