@@ -1,0 +1,45 @@
+name: Build OpenWrt Vince
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space & Install Dependencies
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt update
+          sudo apt install -y build-essential clang llvm git gawk gettext python3-distutils \
+          libncurses5-dev libssl-dev zlib1g-dev unzip rsync file wget
+
+      - name: Clone OpenWrt & Update Feeds
+        run: |
+          git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Generate Config for Vince
+        run: |
+          cd openwrt
+          echo "CONFIG_TARGET_msm89xx=y" > .config
+          echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
+          echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
+          echo "CONFIG_TARGET_DEVICE_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
+          make defconfig
+
+      - name: Build Firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) V=s
+
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-vince-firmware
+          path: openwrt/bin/targets/
