@@ -48,21 +48,6 @@ jobs:
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Inject Patch Fix for Elfutils Obstack Error
-        run: |
-          cd openwrt
-          mkdir -p tools/elfutils/patches
-          cat << 'PATCH_EOF' > tools/elfutils/patches/999-fix-obstack-empty-if.patch
---- a/libgnu/obstack.in.h
-+++ b/libgnu/obstack.in.h
-@@ -140,7 +140,7 @@
-    (void) 0; })
- 
--#if @HAVE_OBSTACK_PRINTF@
-+#if 0
- # ifdefine HAVE_OBSTACK_PRINTF
-PATCH_EOF
-
       - name: Inject Configuration & Lock Target MSM8953
         run: |
           cd openwrt
