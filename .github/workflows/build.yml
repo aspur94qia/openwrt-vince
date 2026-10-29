@@ -89,16 +89,18 @@ jobs:
           SYS_EOF
           chmod +x files/etc/uci-defaults/97-system
 
-      - name: Generate Target Configuration
+      - name: Generate and Verify MSM8953 Target Config
         run: |
           cd openwrt
+          
+          # Tentukan target sesuai arsitektur msm89xx / msm8953
           echo "CONFIG_TARGET_msm89xx=y" > .config
           echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
           echo "CONFIG_TARGET_DEVICE_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
           
-          # Driver & Fitur Vince
+          # Paket pendukung hardware Vince
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
           echo "CONFIG_PACKAGE_hostapd-common=y" >> .config
@@ -128,6 +130,14 @@ jobs:
           echo "CONFIG_PACKAGE_zram-swap=y" >> .config
 
           make defconfig
+
+          # Verifikasi Target: Cek apakah target MSM89xx/MSM8953 aktif di .config
+          if ! grep -q "CONFIG_TARGET_msm89xx=y" .config && ! grep -q "CONFIG_TARGET_msm89xx_msm8953=y" .config; then
+            echo "::error ::Target MSM8953 tidak ditemukan atau ter-reset oleh defconfig! Memeriksa opsi target yang tersedia..."
+            grep -i "msm89" target/linux/msm89xx/Makefile || true
+            exit 1
+          fi
+          echo "Verifikasi Target Berhasil: Target terkonfirmasi untuk MSM8953 (Xiaomi Vince)."
 
       - name: Download Source Packages
         run: |
