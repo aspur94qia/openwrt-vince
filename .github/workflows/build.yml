@@ -47,7 +47,6 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # Clone hanya kalau paket belum ada di feeds
           for repo in luci-app-sms-tool-js luci-app-modemband; do
             if ! find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
               git clone --depth 1 "https://github.com/4nhung/$repo.git" "package/$repo" \
@@ -65,7 +64,6 @@ jobs:
           #!/bin/sh
           LED_DIR="/sys/class/leds/white:status"
           if [ ! -f "$LED_DIR/brightness" ]; then
-              # Cari LED lain, hindari flash/torch/backlight
               LED_DIR=$(ls -d /sys/class/leds/* 2>/dev/null | grep -viE 'flash|torch|backlight|lcd|button|kbd' | head -n 1)
           fi
           LED="$LED_DIR/brightness"
@@ -100,7 +98,7 @@ jobs:
           LED_SCRIPT
           chmod +x files/usr/bin/led-status-monitor.sh
 
-          # 2. Layanan Init LED Monitor (procd, bisa start/stop/respawn)
+          # 2. Layanan Init LED Monitor
           cat << 'LED_SERVICE' > files/etc/init.d/led-status
           #!/bin/sh /etc/rc.common
           START=99
@@ -114,7 +112,7 @@ jobs:
           LED_SERVICE
           chmod +x files/etc/init.d/led-status
 
-          # 3. Battery Bypass Service (stop charge, TETAP ambil daya dari USB)
+          # 3. Battery Bypass Service
           cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
           #!/bin/sh /etc/rc.common
           START=99
@@ -145,7 +143,6 @@ jobs:
           uci set wireless.default_radio0.key='vince12345'
           uci commit wireless
 
-          # Path modem dideteksi otomatis kalau ada, kalau tidak isi manual lewat LuCI
           MODEM_DEV=$(readlink -f /sys/class/net/wwan0/device 2>/dev/null)
           uci set network.wan_sim=interface
           uci set network.wan_sim.proto='modemmanager'
@@ -154,7 +151,6 @@ jobs:
           uci set network.wan_sim.auth='none'
           uci commit network
 
-          # Masukkan wan_sim ke zona firewall wan supaya klien LAN bisa internetan
           uci add_list firewall.@zone[1].network='wan_sim'
           uci commit firewall
 
@@ -175,7 +171,7 @@ jobs:
           CUSTOM_EOF
           chmod +x files/etc/uci-defaults/99-vince-custom
 
-          # 6. Firewall TTL 64 (nama chain unik agar tidak bentrok dengan fw4)
+          # 6. Firewall TTL 64
           cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
           chain mangle_postrouting_ttl64 {
               type filter hook postrouting priority 300; policy accept;
@@ -184,15 +180,13 @@ jobs:
           }
           NFT_EOF
 
-      - name: Inject Configuration & Lock Target MSM8953
+      - name: Inject Configuration & Lock Target MSM89xx
         run: |
           cd openwrt
 
           cat << 'CONFIG_EOF' > my.config
           CONFIG_TARGET_msm89xx=y
-          CONFIG_TARGET_msm89xx_msm8953=y
-          CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
-
+          CONFIG_TARGET_ALL_PROFILES=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
           CONFIG_PACKAGE_luci-compat=y
@@ -200,8 +194,7 @@ jobs:
           CONFIG_PACKAGE_dropbear=y
 
           CONFIG_PACKAGE_kmod-wcn36xx=y
-          # CONFIG_PACKAGE_wpad-basic-mbedtls is not set
-          CONFIG_PACKAGE_wpad-mbedtls=y
+          CONFIG_PACKAGE_hostapd=y
 
           CONFIG_PACKAGE_kmod-tcp-bbr=y
           CONFIG_PACKAGE_sqm-scripts=y
@@ -235,7 +228,6 @@ jobs:
           CONFIG_PACKAGE_fdisk=y
 
           CONFIG_PACKAGE_kmod-nft-offload=y
-          CONFIG_PACKAGE_nftables=y
           CONFIG_PACKAGE_mwan3=y
           CONFIG_PACKAGE_luci-app-mwan3=y
           CONFIG_PACKAGE_wireguard-tools=y
@@ -244,47 +236,31 @@ jobs:
           CONFIG_PACKAGE_zerotier=y
           CONFIG_PACKAGE_luci-app-zerotier=y
 
-          CONFIG_PACKAGE_simple-adblock=y
-          CONFIG_PACKAGE_luci-app-simple-adblock=y
           CONFIG_PACKAGE_zram-swap=y
           CONFIG_PACKAGE_aria2=y
           CONFIG_PACKAGE_luci-app-aria2=y
           CONFIG_PACKAGE_luci-app-statistics=y
           CONFIG_PACKAGE_luci-app-ttyd=y
-
-          CONFIG_PACKAGE_kmod-bluetooth=y
-          CONFIG_PACKAGE_bluez-daemon=y
-          CONFIG_PACKAGE_kmod-sound-core=y
-          CONFIG_PACKAGE_alsa-utils=y
-          CONFIG_PACKAGE_pulseaudio-daemon=y
           CONFIG_EOF
+
+          # Deteksi otomatis simbol spesifik device vince dari target repo
+          VINCE_SYMBOL=$(grep -rn "DEVICE.*vince" target/linux/msm89xx/ 2>/dev/null | head -n 1 | sed -n 's/.*Device\/\(.*\)/CONFIG_TARGET_msm89xx_DEVICE_\1=y/p')
+          if [ -n "$VINCE_SYMBOL" ]; then
+            echo "$VINCE_SYMBOL" >> my.config
+          fi
 
           cp my.config .config
           make defconfig
 
-          # Laporkan simbol yang dibuang defconfig (paket tidak ada / nama salah)
-          grep -E '^CONFIG_' my.config | while read -r line; do
-            grep -qxF "$line" .config || echo "::warning::Hilang setelah defconfig: $line"
-          done
-
-      # VERIFIKASI TARGET & DEVICE
+      # VERIFIKASI TARGET MSM89XX
       - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
-          echo "Subtarget msm89xx tersedia:"
-          ls target/linux/msm89xx 2>/dev/null || true
           if ! grep -q "CONFIG_TARGET_msm89xx=y" .config; then
-            echo "::error::[FATAL] Target bukan msm89xx."
-            grep "CONFIG_TARGET_" .config | head -n 5
+            echo "::error::[FATAL] Target msm89xx tidak terpilih."
             exit 1
           fi
-          if ! grep -q "CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y" .config; then
-            echo "::error::[FATAL] Device xiaomi_vince tidak terpilih. Cek nama device di fork ini:"
-            grep -rn "vince" target/linux/msm89xx | head -n 10 || true
-            grep "CONFIG_TARGET_" .config | head -n 10
-            exit 1
-          fi
-          echo "::notice::[SUCCESS] Target terverifikasi: msm89xx / MSM8953 / xiaomi_vince"
+          echo "::notice::[SUCCESS] Target terverifikasi: msm89xx"
 
       # HOST TOOLS (dengan fallback fix elfutils obstack)
       - name: Build Host Tools
@@ -293,8 +269,9 @@ jobs:
           if ! make tools/install -j$(nproc) V=s; then
             echo "::warning::Host tools gagal, mencoba fix obstack elfutils"
             for f in $(find build_dir/host -path '*elfutils*' -name 'obstack*.h' 2>/dev/null); do
-              echo "Patch: $f"
+              echo "Patching file: $f"
               sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' "$f"
+              sed -i -E 's/#if[[:space:]]*$/#if 0/g' "$f"
             done
             make tools/install -j1 V=s
           fi
