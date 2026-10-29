@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince Master MSM8953
+name: Build OpenWrt Vince via Image Builder Engine
 
 on:
   push:
@@ -9,7 +9,7 @@ env:
   FORCE_UNSAFE_CONFIGURE: 1
 
 jobs:
-  build:
+  build-ib:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04
@@ -77,7 +77,7 @@ jobs:
               git clone --depth 1 "https://github.com/4nhung/$repo.git" "package/$repo" || true
             fi
             if [ -d "package/$repo" ] || find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
-              echo "::notice::[VERIFIKASI SUKSES] Paket $repo siap dikompilasi."
+              echo "::notice::[VERIFIKASI SUKSES] Paket $repo siap disuntikkan."
             fi
           done
 
@@ -292,7 +292,7 @@ jobs:
 
           make defconfig
 
-      - name: Verify Architecture & Configuration Guard
+      - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
           if ! grep -q "CONFIG_TARGET_msm89xx=y" .config; then
@@ -301,16 +301,25 @@ jobs:
           fi
           echo "::notice::[VERIFIKASI SUKSES] Target MSM89xx (Snapdragon 625) terverifikasi aman."
 
-      - name: Compile Firmware
+      - name: Build Host Tools & Toolchain for Image Builder
         run: |
           cd openwrt
-          make download -j8 V=s || make download -j1 V=s
-          make -j$(nproc) V=s || make -j1 V=s
+          make tools/install -j$(nproc) V=s || make tools/install -j1 V=s
+          make toolchain/install -j$(nproc) V=s || make toolchain/install -j1 V=s
+
+      - name: Build Firmware via Image Builder Engine
+        run: |
+          cd openwrt
+          VINCE_PROFILE=$(grep -rn "DEVICE.*vince" target/linux/msm89xx/ 2>/dev/null | head -n 1 | sed -n 's/.*Device\/\(.*\)/\1/p')
+          [ -z "$VINCE_PROFILE" ] && VINCE_PROFILE="xiaomi_vince"
+
+          echo "::notice::Menjalankan Image Builder untuk profile: $VINCE_PROFILE"
+          make image PROFILE="$VINCE_PROFILE" FILES="files" V=s || make image FILES="files" V=s
 
       - name: Verify Generated Firmware Files
         run: |
           cd openwrt
-          echo "=== Memeriksa File Hasil Kompilasi ==="
+          echo "=== Memeriksa File Hasil Image Builder ==="
           ls -la bin/targets/msm89xx/* 2>/dev/null || true
 
           IMAGE_COUNT=$(find bin/targets/msm89xx/ -type f \( -name "*.img" -o -name "*.bin" -o -name "*squashfs*" \) 2>/dev/null | wc -l)
@@ -318,10 +327,10 @@ jobs:
             echo "::error::[VERIFIKASI GAGAL] Tidak ditemukan file firmware di bin/targets/msm89xx!"
             exit 1
           fi
-          echo "::notice::[VERIFIKASI SUKSES] Ditemukan $IMAGE_COUNT file image firmware."
+          echo "::notice::[VERIFIKASI SUKSES] Image Builder berhasil membuat $IMAGE_COUNT file firmware."
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-vince-master-firmware
+          name: openwrt-vince-ib-firmware
           path: openwrt/bin/targets/
