@@ -19,7 +19,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
-          zlib1g-dev gawk git gettext libssl-dev xsltproc rsync unzip wget python3
+          zlib1g-dev gawk git gettext libssl-dev xsltproc rsync unzip wget curl python3 zstd
 
       - name: Setup Headless Config (LEDs, Audio, Storage, Hotspot, TTL, ZRAM)
         run: |
@@ -85,11 +85,11 @@ jobs:
           mkdir -p bin_output
 
           # Download Bootloader lk2nd MSM8953
-          wget -q -O bin_output/lk2nd-msm8953.img https://github.com/msm8916-mainline/lk2nd/releases/latest/download/lk2nd-msm8953.img
+          curl -sSL -o bin_output/lk2nd-msm8953.img https://github.com/msm8916-mainline/lk2nd/releases/latest/download/lk2nd-msm8953.img
 
-          # Download ImageBuilder OpenWrt MSM89xx
-          wget -q https://github.com/akbar-npj/msm8916-openwrt/releases/download/v23.05.0/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.xz || \
-          wget -q https://downloads.openwrt.org/snapshots/targets/msm89xx/msm8953/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.zst
+          # Download ImageBuilder OpenWrt MSM89xx via Mirror Resmi / Snapshot
+          curl -sSL -O https://downloads.openwrt.org/snapshots/targets/msm89xx/msm8953/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.zst || \
+          curl -sSL -O https://github.com/msm8916-mainline/openwrt-msm89xx/releases/download/v23.05.3/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.xz
           
           tar -xf openwrt-imagebuilder-*
           cd openwrt-imagebuilder-*
@@ -97,13 +97,13 @@ jobs:
           # Salin konfigurasi uci-defaults
           cp -r ../files .
 
-          # Paket Hardware Vince yang Kompatibel dan Divalidasi:
+          # Paket Hardware Vince yang Kompatibel:
           PACKAGES_LIST="kmod-wcn36xx hostapd hostapd-common luci dropbear \
           kmod-usb-net-rndis kmod-usb-net-cdc-ether \
           uqmi modemmanager luci-proto-qmi luci-proto-modemmanager kmod-qmi-wwan kmod-usb-serial-option \
-          kmod-bluetooth bluez-utils bluez-daemon alsa-utils \
+          kmod-bluetooth bluez-utils alsa-utils \
           kmod-leds-gpio kmod-ledtrig-heartbeat \
-          block-mount kmod-fs-ext4 kmod-fs-f2fs kmod-fs-vfat kmod-fs-exfat e2fsprogs f2fs-tools \
+          block-mount kmod-fs-ext4 kmod-fs-f2fs kmod-fs-vfat e2fsprogs f2fs-tools \
           iptables-mod-ipopt kmod-ipt-ipopt zram-swap"
 
           # Rakit Firmware Instant
