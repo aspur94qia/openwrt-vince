@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince MSM8953
+name: Build OpenWrt Vince MSM8953 (Cached)
 
 on:
   push:
@@ -28,6 +28,19 @@ jobs:
         run: |
           rm -rf openwrt
           git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
+
+      - name: Cache OpenWrt Downloads & Staging Tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/staging_dir/host
+          key: ${{ runner.os }}-openwrt-cache-${{ hashFiles('openwrt/include/toplevel.mk') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-cache-
+
+      - name: Update & Install Feeds
+        run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -51,6 +64,9 @@ jobs:
           WIFI_EOF
           chmod +x files/etc/uci-defaults/99-autohotspot
 
+          # Aktifkan ccache di dalam OpenWrt
+          echo "CONFIG_DEVEL=y" >> .config
+          echo "CONFIG_CCACHE=y" >> .config
           make defconfig
 
       - name: Compile Firmware
