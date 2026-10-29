@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince MSM8953 (Cached)
+name: Build OpenWrt Vince Ultra (Auto SIM, Anti-Hotspot, Audio & Storage)
 
 on:
   push:
@@ -45,14 +45,16 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Setup Auto Hotspot & Vince Config
+      - name: Inject Custom Configurations & Auto Scripts
         run: |
           cd openwrt
-          mkdir -p files/etc/uci-defaults
+          mkdir -p files/etc/uci-defaults files/etc/nftables.d
 
-          # Skrip uci-defaults agar Wi-Fi AP otomatis aktif tanpa sandi saat booting pertama
-          cat << 'WIFI_EOF' > files/etc/uci-defaults/99-autohotspot
+          # 1. Skrip uci-defaults: Auto Hotspot Wi-Fi, Auto SIM APN, ZRAM & Mounting
+          cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
+
+          # --- Enable Wi-Fi Hotspot ---
           wifi config
           uci set wireless.radio0.disabled='0'
           uci set wireless.default_radio0.mode='ap'
@@ -60,13 +62,76 @@ jobs:
           uci set wireless.default_radio0.encryption='none'
           uci commit wireless
           wifi reload
-          exit 0
-          WIFI_EOF
-          chmod +x files/etc/uci-defaults/99-autohotspot
 
-          # Aktifkan ccache di dalam OpenWrt
+          # --- Auto Modem / SIM Card Setup ---
+          uci set network.wan_sim=interface
+          uci set network.wan_sim.proto='modemmanager'
+          uci set network.wan_sim.device='/sys/devices/platform/soc/78b7000.usb/modem'
+          uci set network.wan_sim.apn='internet'
+          uci set network.wan_sim.auth='none'
+          uci commit network
+
+          # --- Enable ZRAM Swap (RAM Compression) ---
+          uci set system.@system[0].zram_size_mb='1024'
+          uci commit system
+
+          # --- Auto Mount Partitions / SD Card ---
+          uci set fstab.@global[0].anon_mount='1'
+          uci set fstab.@global[0].auto_mount='1'
+          uci set fstab.@global[0].auto_swap='1'
+          uci commit fstab
+
+          exit 0
+          CUSTOM_EOF
+          chmod +x files/etc/uci-defaults/99-vince-custom
+
+          # 2. Aturan Firewall Anti-Tethering / Anti-Deteksi Hotspot (TTL = 64)
+          cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
+          chain mangle_postrouting {
+              type filter hook postrouting priority mangle; policy accept;
+              ip ttl set 64
+              ip6 hoplimit set 64
+          }
+          NFT_EOF
+
+          # 3. Masukkan Pilihan Konfigurasi Target & Paket ke .config
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
+
+          # Wireless & Base System
+          echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
+          echo "CONFIG_PACKAGE_hostapd=y" >> .config
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_PACKAGE_dropbear=y" >> .config
+
+          # SIM & Modem 4G
+          echo "CONFIG_PACKAGE_modemmanager=y" >> .config
+          echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
+          echo "CONFIG_PACKAGE_qmi-utils=y" >> .config
+          echo "CONFIG_PACKAGE_mbim-utils=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
+
+          # Anti-Tethering & Firewall Mangle
+          echo "CONFIG_PACKAGE_kmod-nft-offload=y" >> .config
+          echo "CONFIG_PACKAGE_nftables=y" >> .config
+
+          # Kompresi Data, AdBlock & Memory Management
+          echo "CONFIG_PACKAGE_simple-adblock=y" >> .config
+          echo "CONFIG_PACKAGE_zram-swap=y" >> .config
+
+          # Storage & File System (Vendor, System, SD Card)
+          echo "CONFIG_PACKAGE_block-mount=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-fs-ext4=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-fs-f2fs=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-fs-exfat=y" >> .config
+          echo "CONFIG_PACKAGE_fdisk=y" >> .config
+
+          # Bluetooth Audio Receiver & ALSA Sound
+          echo "CONFIG_PACKAGE_bluez-daemon=y" >> .config
+          echo "CONFIG_PACKAGE_alsa-utils=y" >> .config
+          echo "CONFIG_PACKAGE_pulseaudio-daemon=y" >> .config
+
           make defconfig
 
       - name: Compile Firmware
@@ -77,5 +142,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-vince-firmware
+          name: openwrt-vince-ultra-firmware
           path: openwrt/bin/targets/
