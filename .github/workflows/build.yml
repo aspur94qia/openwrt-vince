@@ -48,16 +48,20 @@ jobs:
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Inject Permanent Elfutils Fix in OpenWrt Makefile
+      - name: Patch Elfutils Host Tool
         run: |
           cd openwrt
-          cat << 'HOOK_EOF' >> tools/elfutils/Makefile
-
-define Host/Configure/Pre
-	sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' $$(HOST_BUILD_DIR)/libgnu/obstack.in.h
-	sed -i 's/#if $$/#if 0/g' $$(HOST_BUILD_DIR)/libgnu/obstack.in.h
-endef
-HOOK_EOF
+          mkdir -p tools/elfutils/patches
+          cat << 'PATCH_EOF' > tools/elfutils/patches/001-fix-obstack.patch
+--- a/libgnu/obstack.in.h
++++ b/libgnu/obstack.in.h
+@@ -140,7 +140,7 @@
+    (void) 0; })
+ 
+-#if @HAVE_OBSTACK_PRINTF@
++#if 0
+ # ifdefine HAVE_OBSTACK_PRINTF
+PATCH_EOF
 
       - name: Inject Configuration & Lock Target MSM8953
         run: |
@@ -198,7 +202,7 @@ HOOK_EOF
           echo "CONFIG_PACKAGE_relayd=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-relay=y" >> .config
 
-          # Modem 4G / SIM & Driver USB Network Lengkap (DITAMBAHKAN)
+          # Modem 4G / SIM & Driver USB Network Lengkap
           echo "CONFIG_PACKAGE_modemmanager=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
           echo "CONFIG_PACKAGE_qmi-utils=y" >> .config
@@ -213,7 +217,7 @@ HOOK_EOF
           echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
           echo "CONFIG_PACKAGE_kmod-usb-serial-qualcomm=y" >> .config
 
-          # Storage OTG & File System (DITAMBAHKAN)
+          # Storage OTG & File System
           echo "CONFIG_PACKAGE_kmod-usb-storage=y" >> .config
           echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
           echo "CONFIG_PACKAGE_kmod-usb3=y" >> .config
@@ -233,7 +237,7 @@ HOOK_EOF
           echo "CONFIG_PACKAGE_zerotier=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-zerotier=y" >> .config
 
-          # Tools & UtilitiesTambahan
+          # Tools & Utilities
           echo "CONFIG_PACKAGE_simple-adblock=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-simple-adblock=y" >> .config
           echo "CONFIG_PACKAGE_zram-swap=y" >> .config
@@ -249,7 +253,7 @@ HOOK_EOF
 
           make defconfig
 
-      # VERIFIKASI KEAMANAN ARSITEKTUR MSM8953
+      # VERIFIKASI ARSITEKTUR MSM8953
       - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
@@ -266,7 +270,7 @@ HOOK_EOF
           cd openwrt
           make -j$(nproc) V=s || make -j1 V=s
 
-      # UPLOAD ARTIFACT LANGSUNG
+      # UPLOAD ARTIFACT
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
