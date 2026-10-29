@@ -22,8 +22,9 @@ jobs:
           libelf-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev
 
-      - name: Clone OpenWrt & Update Feeds
+      - name: Clone OpenWrt Repo & Update Feeds
         run: |
+          git clone --depth 1 https://github.com/akbar-npj/msm8916-openwrt.git openwrt || \
           git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
           cd openwrt
           ./scripts/feeds update -a
@@ -48,15 +49,10 @@ jobs:
           WIFI_EOF
           chmod +x files/etc/uci-defaults/99-autohotspot
 
-          # Konfigurasi target & driver Wi-Fi Vince
+          # Konfigurasi target MSM8953 (Vince) & Wi-Fi
           echo "CONFIG_TARGET_msm89xx=y" > .config
           echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
-          echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
-          echo "CONFIG_TARGET_DEVICE_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
-          
-          # Driver Wi-Fi Qualcomm & Hostapd AP
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
-          echo "CONFIG_PACKAGE_wcn36xx-firmware=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
           echo "CONFIG_PACKAGE_hostapd-common=y" >> .config
           echo "CONFIG_PACKAGE_luci=y" >> .config
@@ -67,7 +63,7 @@ jobs:
       - name: Build Firmware
         run: |
           cd openwrt
-          make -j$(nproc) V=s
+          make -j$(nproc) V=s || make -j1 V=s
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
