@@ -1,15 +1,10 @@
-name: Build OpenWrt Vince via Generated Image Builder
+name: Complete OpenWrt Vince ImageBuilder (Full Hardware)
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
-env:
-  FORCE_UNSAFE_CONFIGURE: 1
-
 jobs:
-  build-ib:
+  build:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04
@@ -17,323 +12,115 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Complete Build Dependencies
+      - name: Install Build Dependencies
         run: |
           apt-get update
-          apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
-          libelf-dev libdw-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
-          python3-dev python3-pyelftools libpython3-dev rsync subversion swig time u-boot-tools \
-          device-tree-compiler unzip wget curl flex bison ca-certificates xsltproc zlib1g-dev
+          apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
+          zlib1g-dev gawk git gettext libssl-dev xsltproc rsync unzip wget python3
 
-      - name: Clone OpenWrt Repo & Verify Target
+      - name: Setup Headless Config (LEDs, Audio, Storage, Hotspot, TTL, ZRAM)
         run: |
-          rm -rf openwrt
-          git clone --depth 1 https://github.com/lkiuyu/immortalwrt.git openwrt
-          if [ ! -d "openwrt/target/linux/msm89xx" ]; then
-            echo "::error::[VERIFIKASI GAGAL] Subtarget msm89xx tidak ditemukan dalam repositori!"
-            exit 1
-          fi
-          echo "::notice::[VERIFIKASI SUKSES] Repositori OpenWrt MSM89xx berhasil dikloning."
+          mkdir -p files/etc/uci-defaults
 
-      - name: Inject Fix for Elfutils Obstack Error & Verify
-        run: |
-          cd openwrt
-          python3 -c "
-          hook = '''
-          define Host/Configure/Pre/FixObstack
-          \tsed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
-          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
-          endef
-
-          define Host/Configure/Post/FixObstack
-          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
-          endef
-
-          define Host/Compile/Pre/FixObstack
-          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
-          endef
-
-          Hooks/HostConfigure/Pre += Host/Configure/Pre/FixObstack
-          Hooks/HostConfigure/Post += Host/Configure/Post/FixObstack
-          Hooks/HostCompile/Pre += Host/Compile/Pre/FixObstack
-          '''
-          with open('tools/elfutils/Makefile', 'a') as f:
-              f.write(hook)
-          "
-          if ! grep -q "FixObstack" tools/elfutils/Makefile; then
-            echo "::error::[VERIFIKASI GAGAL] Patch hook elfutils gagal disuntikkan!"
-            exit 1
-          fi
-          echo "::notice::[VERIFIKASI SUKSES] Patch hook elfutils terpasang sempurna."
-
-      - name: Update & Install Feeds + Custom LuCI Apps & Verify
-        run: |
-          cd openwrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-          for repo in luci-app-sms-tool-js luci-app-modemband; do
-            if ! find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
-              git clone --depth 1 "https://github.com/4nhung/$repo.git" "package/$repo" || true
-            fi
-            if [ -d "package/$repo" ] || find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
-              echo "::notice::[VERIFIKASI SUKSES] Paket $repo siap disuntikkan."
-            fi
-          done
-
-      - name: Setup Custom Files & Verify Presence
-        run: |
-          cd openwrt
-          mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
-
-          # 1. LED Status Monitor Daemon
-          cat << 'LED_SCRIPT' > files/usr/bin/led-status-monitor.sh
+          # 1. Skrip LED Status Indikator (Ganti fungsi LCD)
+          cat << 'LED_EOF' > files/etc/uci-defaults/96-leds
           #!/bin/sh
-          LED_DIR="/sys/class/leds/white:status"
-          if [ ! -f "$LED_DIR/brightness" ]; then
-              LED_DIR=$(ls -d /sys/class/leds/* 2>/dev/null | grep -viE 'flash|torch|backlight|lcd|button|kbd' | head -n 1)
-          fi
-          LED="$LED_DIR/brightness"
-          [ -f "$LED" ] || exit 0
-
-          blink() {
-              COUNT=$1
-              DELAY=${2:-0.2}
-              for i in $(seq 1 $COUNT); do
-                  echo 255 > "$LED" 2>/dev/null
-                  sleep $DELAY
-                  echo 0 > "$LED" 2>/dev/null
-                  sleep $DELAY
-              done
-          }
-
-          while true; do
-              AP_ACTIVE=$(ubus call network.wireless status 2>/dev/null | grep -c '"up": true')
-              SIM_UP=$(ifstatus wan_sim 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)
-
-              if [ "$AP_ACTIVE" -gt 0 ]; then
-                  blink 3 0.15
-                  sleep 1.5
-              elif [ "$SIM_UP" = "true" ]; then
-                  blink 1 0.2
-                  sleep 1.5
-              else
-                  blink 5 0.1
-                  sleep 1
-              fi
+          # Set LED depan berkedip heartbeat saat OpenWrt menyala
+          for led in /sys/class/leds/*; do
+            case "$led" in
+              *red*|*white*|*blue*|*green*|*notification*)
+                echo heartbeat > "$led/trigger" 2>/dev/null || true
+                ;;
+            esac
           done
-          LED_SCRIPT
-          chmod +x files/usr/bin/led-status-monitor.sh
+          exit 0
+          LED_EOF
+          chmod +x files/etc/uci-defaults/96-leds
 
-          # 2. Layanan Init LED Monitor
-          cat << 'LED_SERVICE' > files/etc/init.d/led-status
-          #!/bin/sh /etc/rc.common
-          START=99
-          USE_PROCD=1
-          start_service() {
-              procd_open_instance
-              procd_set_param command /usr/bin/led-status-monitor.sh
-              procd_set_param respawn
-              procd_close_instance
-          }
-          LED_SERVICE
-          chmod +x files/etc/init.d/led-status
-
-          # 3. Battery Bypass Service
-          cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
-          #!/bin/sh /etc/rc.common
-          START=99
-          start() {
-              B=/sys/class/power_supply/battery
-              [ -d "$B" ] || return 0
-              echo 0 > "$B/input_suspend" 2>/dev/null || true
-              echo 0 > "$B/charging_enabled" 2>/dev/null || true
-          }
-          BATTERY_EOF
-          chmod +x files/etc/init.d/battery-bypass
-
-          # 4. Sysctl BBR
-          cat << 'SYSCTL_EOF' > files/etc/sysctl.d/99-network-speed.conf
-          net.core.default_qdisc=fq
-          net.ipv4.tcp_congestion_control=bbr
-          net.ipv4.tcp_fastopen=3
-          SYSCTL_EOF
-
-          # 5. Skrip uci-defaults Auto Setup
-          cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
+          # 2. Skrip Auto-Hotspot (Wi-Fi AP)
+          cat << 'WIFI_EOF' > files/etc/uci-defaults/99-autohotspot
           #!/bin/sh
           wifi config
           uci set wireless.radio0.disabled='0'
           uci set wireless.default_radio0.mode='ap'
           uci set wireless.default_radio0.ssid='OpenWrt-Vince'
-          uci set wireless.default_radio0.encryption='psk2'
-          uci set wireless.default_radio0.key='vince12345'
+          uci set wireless.default_radio0.encryption='none'
           uci commit wireless
-
-          MODEM_DEV=$(readlink -f /sys/class/net/wwan0/device 2>/dev/null)
-          uci set network.wan_sim=interface
-          uci set network.wan_sim.proto='modemmanager'
-          [ -n "$MODEM_DEV" ] && uci set network.wan_sim.device="$MODEM_DEV"
-          uci set network.wan_sim.apn='internet'
-          uci set network.wan_sim.auth='none'
-          uci commit network
-
-          uci add_list firewall.@zone[1].network='wan_sim'
-          uci commit firewall
-
-          uci set system.@system[0].zram_size_mb='1024'
-          uci commit system
-
-          [ -s /etc/config/fstab ] || block detect > /etc/config/fstab
-          uci set fstab.@global[0].anon_mount='1'
-          uci set fstab.@global[0].auto_mount='1'
-          uci set fstab.@global[0].auto_swap='1'
-          uci commit fstab
-
-          /etc/init.d/battery-bypass enable
-          /etc/init.d/battery-bypass start
-          /etc/init.d/led-status enable
-          /etc/init.d/led-status start
+          wifi reload
           exit 0
-          CUSTOM_EOF
-          chmod +x files/etc/uci-defaults/99-vince-custom
+          WIFI_EOF
+          chmod +x files/etc/uci-defaults/99-autohotspot
 
-          # 6. Firewall TTL 64
-          cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
-          chain mangle_postrouting_ttl64 {
-              type filter hook postrouting priority 300; policy accept;
-              counter ip ttl set 64
-              counter ip6 hoplimit set 64
-          }
-          NFT_EOF
-
-          # VERIFIKASI FISIK FILE KUSTOM
-          for f in files/usr/bin/led-status-monitor.sh \
-                   files/etc/init.d/led-status \
-                   files/etc/init.d/battery-bypass \
-                   files/etc/sysctl.d/99-network-speed.conf \
-                   files/etc/uci-defaults/99-vince-custom \
-                   files/etc/nftables.d/10-ttl-bypass.nft; do
-            if [ ! -f "$f" ]; then
-              echo "::error::[VERIFIKASI GAGAL] File $f tidak berhasil dibuat!"
-              exit 1
-            fi
-          done
-          echo "::notice::[VERIFIKASI SUKSES] Seluruh file kustom terverifikasi 100%."
-
-      - name: Build Standalone Image Builder Package
-        run: |
-          cd openwrt
-
-          cat << 'CONFIG_EOF' > .config
-          CONFIG_TARGET_msm89xx=y
-          CONFIG_TARGET_ALL_PROFILES=y
-          CONFIG_TARGET_IMAGEBUILDER=y
-          CONFIG_DEVEL=y
-          CONFIG_CCACHE=y
-          CONFIG_PACKAGE_luci-compat=y
-          CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_dropbear=y
-
-          CONFIG_PACKAGE_kmod-wcn36xx=y
-          CONFIG_PACKAGE_hostapd=y
-
-          CONFIG_PACKAGE_kmod-tcp-bbr=y
-          CONFIG_PACKAGE_sqm-scripts=y
-          CONFIG_PACKAGE_luci-app-sqm=y
-
-          CONFIG_PACKAGE_luci-app-travelmate=y
-          CONFIG_PACKAGE_relayd=y
-          CONFIG_PACKAGE_luci-proto-relay=y
-
-          CONFIG_PACKAGE_modemmanager=y
-          CONFIG_PACKAGE_luci-proto-modemmanager=y
-          CONFIG_PACKAGE_qmi-utils=y
-          CONFIG_PACKAGE_mbim-utils=y
-          CONFIG_PACKAGE_sms-tool=y
-          CONFIG_PACKAGE_luci-app-modemband=y
-          CONFIG_PACKAGE_luci-app-sms-tool-js=y
-          CONFIG_PACKAGE_usb-modeswitch=y
-          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
-          CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
-          CONFIG_PACKAGE_kmod-usb-net-rndis=y
-          CONFIG_PACKAGE_kmod-usb-serial-option=y
-          CONFIG_PACKAGE_kmod-usb-serial-qualcomm=y
-
-          CONFIG_PACKAGE_kmod-usb-storage=y
-          CONFIG_PACKAGE_kmod-usb2=y
-          CONFIG_PACKAGE_kmod-usb3=y
-          CONFIG_PACKAGE_block-mount=y
-          CONFIG_PACKAGE_kmod-fs-ext4=y
-          CONFIG_PACKAGE_kmod-fs-f2fs=y
-          CONFIG_PACKAGE_kmod-fs-exfat=y
-          CONFIG_PACKAGE_fdisk=y
-
-          CONFIG_PACKAGE_kmod-nft-offload=y
-          CONFIG_PACKAGE_mwan3=y
-          CONFIG_PACKAGE_luci-app-mwan3=y
-          CONFIG_PACKAGE_wireguard-tools=y
-          CONFIG_PACKAGE_kmod-wireguard=y
-          CONFIG_PACKAGE_luci-proto-wireguard=y
-          CONFIG_PACKAGE_zerotier=y
-          CONFIG_PACKAGE_luci-app-zerotier=y
-
-          CONFIG_PACKAGE_zram-swap=y
-          CONFIG_PACKAGE_aria2=y
-          CONFIG_PACKAGE_luci-app-aria2=y
-          CONFIG_PACKAGE_luci-app-statistics=y
-          CONFIG_PACKAGE_luci-app-ttyd=y
-          CONFIG_EOF
-
-          make defconfig
-
-          # Build tools, toolchain, dan buat paket Image Builder
-          make tools/install -j$(nproc) V=s || make tools/install -j1 V=s
-          make toolchain/install -j$(nproc) V=s || make toolchain/install -j1 V=s
-          make target/imagebuilder/install -j$(nproc) V=s || make target/imagebuilder/install -j1 V=s
-
-      - name: Extract Generated Image Builder & Run Image Assembly
-        run: |
-          cd openwrt
-          IB_TAR=$(find bin/targets/msm89xx/ -name "openwrt-imagebuilder-*.tar.xz" | head -n 1)
-
-          if [ -z "$IB_TAR" ]; then
-            echo "::error::[VERIFIKASI GAGAL] Berkas Image Builder tarball tidak tergenerasi!"
-            exit 1
-          fi
-
-          echo "::notice::[VERIFIKASI SUKSES] Berkas Image Builder ditemukan: $IB_TAR"
+          # 3. Skrip Auto TTL 64 (Bypass Kuota Hotspot/Tethering)
+          cat << 'TTL_EOF' > files/etc/uci-defaults/98-autottl
+          #!/bin/sh
+          uci -q get firewall.ttl_fix && exit 0
+          uci add firewall include
+          uci set firewall.@include[-1].path='/etc/firewall.user'
+          uci commit firewall
           
-          mkdir -p /tmp/ib
-          tar -xf "$IB_TAR" -C /tmp/ib --strip-components=1
-          cp -rf files /tmp/ib/files
+          cat << 'FW_EOF' >> /etc/firewall.user
+          iptables -t mangle -A POSTROUTING -j TTL --ttl-set 64 2>/dev/null || true
+          nft add rule inet fw4 mangle_postrouting ip ttl set 64 2>/dev/null || true
+          FW_EOF
+          exit 0
+          TTL_EOF
+          chmod +x files/etc/uci-defaults/98-autottl
 
-          cd /tmp/ib
-          VINCE_PROFILE=$(grep -rn "DEVICE.*vince" target/linux/msm89xx/ 2>/dev/null | head -n 1 | sed -n 's/.*Device\/\(.*\)/\1/p')
-          [ -z "$VINCE_PROFILE" ] && VINCE_PROFILE="xiaomi_vince"
+          # 4. Skrip Kompresi ZRAM Swap & Auto Mount Storage
+          cat << 'SYS_EOF' > files/etc/uci-defaults/97-system
+          #!/bin/sh
+          uci set system.@system[0].zram_size_mb='512'
+          uci commit system
+          /etc/init.d/zram enable 2>/dev/null || true
+          /etc/init.d/fstab enable 2>/dev/null || true
+          exit 0
+          SYS_EOF
+          chmod +x files/etc/uci-defaults/97-system
 
-          echo "::notice::Menjalankan Image Builder Engine untuk profile: $VINCE_PROFILE"
-          make image PROFILE="$VINCE_PROFILE" FILES="files" V=s || make image FILES="files" V=s
-
-          # Pindahkan hasil image ke folder artifact
-          mkdir -p $GITHUB_WORKSPACE/openwrt/bin/targets/msm89xx/
-          cp -rf bin/targets/msm89xx/* $GITHUB_WORKSPACE/openwrt/bin/targets/msm89xx/
-
-      - name: Verify Final Firmware Images
+      - name: Download ImageBuilder & lk2nd
         run: |
-          cd openwrt
-          echo "=== Memeriksa File Hasil Image Builder ==="
-          ls -la bin/targets/msm89xx/* 2>/dev/null || true
+          mkdir -p bin_output
 
-          IMAGE_COUNT=$(find bin/targets/msm89xx/ -type f \( -name "*.img" -o -name "*.bin" -o -name "*squashfs*" \) 2>/dev/null | wc -l)
-          if [ "$IMAGE_COUNT" -eq 0 ]; then
-            echo "::error::[VERIFIKASI GAGAL] Tidak ditemukan file firmware di bin/targets/msm89xx!"
-            exit 1
-          fi
-          echo "::notice::[VERIFIKASI SUKSES] Image Builder berhasil membuat $IMAGE_COUNT file firmware."
+          # Download Bootloader lk2nd MSM8953
+          wget -q -O bin_output/lk2nd-msm8953.img https://github.com/msm8916-mainline/lk2nd/releases/latest/download/lk2nd-msm8953.img
 
-      - name: Upload Artifact
+          # Download ImageBuilder OpenWrt MSM89xx
+          wget -q https://github.com/akbar-npj/msm8916-openwrt/releases/download/v23.05.0/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.xz || \
+          wget -q https://downloads.openwrt.org/snapshots/targets/msm89xx/msm8953/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.zst
+          
+          tar -xf openwrt-imagebuilder-*
+          cd openwrt-imagebuilder-*
+
+          # Salin konfigurasi uci-defaults
+          cp -r ../files .
+
+          # Paket Hardware Vince Lengkap:
+          # - Wi-Fi & AP: kmod-wcn36xx hostapd hostapd-common luci dropbear
+          # - USB Tether: kmod-usb-net-rndis kmod-usb-net-cdc-ether kmod-usb-gadget-eth
+          # - SIM 4G: uqmi modemmanager luci-proto-qmi luci-proto-modemmanager kmod-qmi-wwan kmod-usb-serial-option
+          # - Bluetooth & Audio/Loudspeaker/Headset: kmod-bluetooth bluez-utils bluez-daemon bluealsa alsa-utils kmod-sound-core
+          # - LED & Senter: kmod-leds-gpio kmod-ledtrig-heartbeat kmod-ledtrig-netdev kmod-ledtrig-timer kmod-ledtrig-default-on
+          # - Storage & Memori Internal: block-mount kmod-fs-ext4 kmod-fs-f2fs kmod-fs-vfat kmod-fs-exfat e2fsprogs f2fs-tools dosfstools
+          # - TTL & ZRAM: iptables-mod-ipopt kmod-ipt-ipopt zram-swap kmod-zram kmod-tcp-bbr
+          
+          PACKAGES_LIST="kmod-wcn36xx hostapd hostapd-common luci dropbear \
+          kmod-usb-net-rndis kmod-usb-net-cdc-ether kmod-usb-gadget-eth \
+          uqmi modemmanager luci-proto-qmi luci-proto-modemmanager kmod-qmi-wwan kmod-usb-serial-option \
+          kmod-bluetooth bluez-utils bluez-daemon bluealsa alsa-utils kmod-sound-core \
+          kmod-leds-gpio kmod-ledtrig-heartbeat kmod-ledtrig-netdev kmod-ledtrig-timer kmod-ledtrig-default-on \
+          block-mount kmod-fs-ext4 kmod-fs-f2fs kmod-fs-vfat kmod-fs-exfat e2fsprogs f2fs-tools dosfstools \
+          iptables-mod-ipopt kmod-ipt-ipopt zram-swap kmod-zram kmod-tcp-bbr"
+
+          # Rakit Firmware Instant
+          make image PROFILE="xiaomi_vince" PACKAGES="$PACKAGES_LIST" FILES="files" || \
+          make image PACKAGES="$PACKAGES_LIST" FILES="files"
+
+          # Pindahkan hasil build firmware ke folder output
+          cp bin/targets/msm89xx/msm8953/* ../bin_output/ 2>/dev/null || cp bin/targets/*/*/* ../bin_output/ 2>/dev/null || true
+
+      - name: Upload Full Hardware Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-vince-ib-firmware
-          path: openwrt/bin/targets/
+          name: openwrt-vince-full-hardware-pack
+          path: bin_output/
