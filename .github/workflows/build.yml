@@ -8,16 +8,15 @@ on:
 env:
   FORCE_UNSAFE_CONFIGURE: 1
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Install Complete Build Dependencies
         run: |
           apt-get update
@@ -31,15 +30,28 @@ jobs:
           rm -rf openwrt
           git clone --depth 1 https://github.com/lkiuyu/immortalwrt.git openwrt
 
-      - name: Restore Download & ccache Cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            openwrt/dl
-            openwrt/.ccache
-          key: openwrt-vince-${{ github.run_id }}
-          restore-keys: |
-            openwrt-vince-
+      - name: Inject Triple-Hook Fix for Elfutils Obstack Error
+        run: |
+          cd openwrt
+          cat << 'HOOK_EOF' >> tools/elfutils/Makefile
+
+define Host/Configure/Pre/FixObstack
+	sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+	sed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+endef
+
+define Host/Configure/Post/FixObstack
+	sed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
+endef
+
+define Host/Compile/Pre/FixObstack
+	sed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
+endef
+
+Hooks/HostConfigure/Pre += Host/Configure/Pre/FixObstack
+Hooks/HostConfigure/Post += Host/Configure/Post/FixObstack
+Hooks/HostCompile/Pre += Host/Compile/Pre/FixObstack
+HOOK_EOF
 
       - name: Update & Install Feeds + Custom LuCI Apps
         run: |
@@ -49,8 +61,7 @@ jobs:
 
           for repo in luci-app-sms-tool-js luci-app-modemband; do
             if ! find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
-              git clone --depth 1 "https://github.com/4nhung/$repo.git" "package/$repo" \
-                || echo "::warning::Gagal clone $repo, paket ini tidak akan masuk firmware"
+              git clone --depth 1 "https://github.com/4nhung/$repo.git" "package/$repo" || true
             fi
           done
 
@@ -184,7 +195,7 @@ jobs:
         run: |
           cd openwrt
 
-          cat << 'CONFIG_EOF' > my.config
+          cat << 'CONFIG_EOF' > .config
           CONFIG_TARGET_msm89xx=y
           CONFIG_TARGET_ALL_PROFILES=y
           CONFIG_DEVEL=y
@@ -243,16 +254,13 @@ jobs:
           CONFIG_PACKAGE_luci-app-ttyd=y
           CONFIG_EOF
 
-          # Deteksi otomatis simbol spesifik device vince dari target repo
           VINCE_SYMBOL=$(grep -rn "DEVICE.*vince" target/linux/msm89xx/ 2>/dev/null | head -n 1 | sed -n 's/.*Device\/\(.*\)/CONFIG_TARGET_msm89xx_DEVICE_\1=y/p')
           if [ -n "$VINCE_SYMBOL" ]; then
-            echo "$VINCE_SYMBOL" >> my.config
+            echo "$VINCE_SYMBOL" >> .config
           fi
 
-          cp my.config .config
           make defconfig
 
-      # VERIFIKASI TARGET MSM89XX
       - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
@@ -262,45 +270,12 @@ jobs:
           fi
           echo "::notice::[SUCCESS] Target terverifikasi: msm89xx"
 
-      # HOST TOOLS (dengan fallback fix elfutils obstack)
-      - name: Build Host Tools
-        run: |
-          cd openwrt
-          if ! make tools/install -j$(nproc) V=s; then
-            echo "::warning::Host tools gagal, mencoba fix obstack elfutils"
-            for f in $(find build_dir/host -path '*elfutils*' -name 'obstack*.h' 2>/dev/null); do
-              echo "Patching file: $f"
-              sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' "$f"
-              sed -i -E 's/#if[[:space:]]*$/#if 0/g' "$f"
-            done
-            make tools/install -j1 V=s
-          fi
-
-      # KOMPILASI UTAMA
       - name: Compile Firmware
         run: |
           cd openwrt
           make download -j8 V=s || make download -j1 V=s
           make -j$(nproc) V=s || make -j1 V=s
 
-      - name: Save Download & ccache Cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            openwrt/dl
-            openwrt/.ccache
-          key: openwrt-vince-${{ github.run_id }}
-
-      - name: Upload Logs On Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openwrt-build-logs
-          path: openwrt/logs/
-          if-no-files-found: ignore
-
-      # UPLOAD ARTIFACT
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
