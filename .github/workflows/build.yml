@@ -48,23 +48,16 @@ jobs:
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Patch Elfutils Host Tool
+      - name: Inject OpenWrt Host Build Hook for Elfutils
         run: |
           cd openwrt
-          mkdir -p tools/elfutils/patches
-          python3 -c "
-          patch_content = '''--- a/libgnu/obstack.in.h
-          +++ b/libgnu/obstack.in.h
-          @@ -140,7 +140,7 @@
-             (void) 0; })
-
-          -#if @HAVE_OBSTACK_PRINTF@
-          +#if 0
-           # ifdefine HAVE_OBSTACK_PRINTF
-          '''
-          with open('tools/elfutils/patches/001-fix-obstack.patch', 'w') as f:
-              f.write(patch_content)
-          "
+          rm -f tools/elfutils/patches/001-fix-obstack.patch
+          echo "" >> tools/elfutils/Makefile
+          echo "define Host/Configure/Pre/FixObstack" >> tools/elfutils/Makefile
+          echo "	sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h" >> tools/elfutils/Makefile
+          echo "	sed -i 's/#if \$\$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h" >> tools/elfutils/Makefile
+          echo "endef" >> tools/elfutils/Makefile
+          echo "Hooks/HostConfigure/Pre += Host/Configure/Pre/FixObstack" >> tools/elfutils/Makefile
 
       - name: Inject Configuration & Lock Target MSM8953
         run: |
