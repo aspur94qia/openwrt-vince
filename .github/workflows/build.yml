@@ -85,13 +85,34 @@ jobs:
           mkdir -p bin_output
 
           # Download Bootloader lk2nd MSM8953
-          curl -sSL -o bin_output/lk2nd-msm8953.img https://github.com/msm8916-mainline/lk2nd/releases/latest/download/lk2nd-msm8953.img
+          curl -f -sSL -o bin_output/lk2nd-msm8953.img https://github.com/msm8916-mainline/lk2nd/releases/latest/download/lk2nd-msm8953.img || true
 
-          # Download ImageBuilder OpenWrt MSM89xx via Mirror Resmi / Snapshot
-          curl -sSL -O https://downloads.openwrt.org/snapshots/targets/msm89xx/msm8953/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.zst || \
-          curl -sSL -O https://github.com/msm8916-mainline/openwrt-msm89xx/releases/download/v23.05.3/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.xz
-          
-          tar -xf openwrt-imagebuilder-*
+          # Download ImageBuilder dengan Validasi File
+          URLS=(
+            "https://github.com/akbar-npj/msm8916-openwrt/releases/download/v23.05.0/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.xz"
+            "https://downloads.openwrt.org/snapshots/targets/msm89xx/msm8953/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.zst"
+          )
+
+          DOWNLOAD_OK=0
+          for url in "${URLS[@]}"; do
+            echo "Mencoba mengunduh dari: $url"
+            rm -f ib_archive*
+            if curl -f -sSL -o ib_archive "$url"; then
+              SIZE=$(stat -c%s "ib_archive" 2>/dev/null || echo 0)
+              if [ "$SIZE" -gt 5000000 ]; then
+                echo "Berhasil mengunduh ImageBuilder valid ($(expr $SIZE / 1048576) MB)"
+                DOWNLOAD_OK=1
+                break
+              fi
+            fi
+          done
+
+          if [ $DOWNLOAD_OK -ne 1 ]; then
+            echo "Error: Gagal mengunduh ImageBuilder dari semua mirror!"
+            exit 1
+          fi
+
+          tar -xf ib_archive
           cd openwrt-imagebuilder-*
 
           # Salin konfigurasi uci-defaults
