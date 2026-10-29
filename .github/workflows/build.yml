@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince Master (Data Compression, BBR, Repeater & Full Tools)
+name: Build OpenWrt Vince Master (LED Status Monitor, Battery Bypass & Full Tools)
 
 on:
   push:
@@ -45,16 +45,69 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # Clone aplikasi LuCI khusus (Modem Band & SMS Tool JS)
+          # Clone aplikasi LuCI khusus
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Inject Custom Auto-Configuration, BBR, Battery Bypass & Repeater
+      - name: Inject LED Monitor, Battery Bypass & Complete Auto Config
         run: |
           cd openwrt
-          mkdir -p files/etc/uci-defaults files/etc/nftables.d files/etc/init.d files/etc/sysctl.d
+          mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
 
-          # 1. Skrip Battery Bypass & Charge Protection Service
+          # 1. Skrip Daemon LED Status Monitor (Latar Belakang)
+          cat << 'LED_SCRIPT' > files/usr/bin/led-status-monitor.sh
+          #!/bin/sh
+
+          LED="/sys/class/leds/white:status/brightness"
+          [ ! -f "$LED" ] && LED=$(ls /sys/class/leds/*/brightness 2>/dev/null | head -n 1)
+
+          blink() {
+              COUNT=$1
+              DELAY=${2:-0.2}
+              for i in $(seq 1 $COUNT); do
+                  echo 255 > "$LED" 2>/dev/null
+                  sleep $DELAY
+                  echo 0 > "$LED" 2>/dev/null
+                  sleep $DELAY
+              done
+          }
+
+          while true; do
+              # Cek status Wi-Fi AP
+              AP_ACTIVE=$(ubus call network.wireless status 2>/dev/null | grep -c '"up": true')
+              
+              # Cek status WAN SIM 4G
+              SIM_ACTIVE=$(ifconfig wan_sim 2>/dev/null | grep -c 'inet addr')
+
+              if [ "$AP_ACTIVE" -gt 0 ]; then
+                  # Kode 3: Hotspot Aktif & Siap (Kedip 3x)
+                  blink 3 0.15
+                  sleep 1.5
+              elif [ "$SIM_ACTIVE" -gt 0 ]; then
+                  # Kode 1: Connecting/Searching 4G SIM (Kedip 1x)
+                  blink 1 0.2
+                  sleep 1.5
+              else
+                  # Kode 5: Warning / Searching (Kedip 5x Cepat)
+                  blink 5 0.1
+                  sleep 1
+              fi
+          done
+          LED_SCRIPT
+          chmod +x files/usr/bin/led-status-monitor.sh
+
+          # 2. Layanan Init LED Status Monitor
+          cat << 'LED_SERVICE' > files/etc/init.d/led-status
+          #!/bin/sh /etc/rc.common
+          START=99
+
+          start() {
+              /usr/bin/led-status-monitor.sh &
+          }
+          LED_SERVICE
+          chmod +x files/etc/init.d/led-status
+
+          # 3. Skrip Battery Bypass
           cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
           #!/bin/sh /etc/rc.common
           START=99
@@ -68,21 +121,18 @@ jobs:
           BATTERY_EOF
           chmod +x files/etc/init.d/battery-bypass
 
-          # 2. Sysctl Optimasi BBR & Fast TCP Data Compression
+          # 4. Sysctl BBR
           cat << 'SYSCTL_EOF' > files/etc/sysctl.d/99-network-speed.conf
           net.core.default_qdisc=fq
           net.ipv4.tcp_congestion_control=bbr
           net.ipv4.tcp_fastopen=3
-          net.ipv4.tcp_syncookies=1
-          net.ipv4.tcp_rmem=4096 87380 67108864
-          net.ipv4.tcp_wmem=4096 65536 67108864
           SYSCTL_EOF
 
-          # 3. Skrip uci-defaults: Hotspot, Auto SIM, ZRAM, Storage & Repeater
+          # 5. Skrip uci-defaults Auto Setup
           cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
 
-          # --- Enable Wi-Fi Hotspot ---
+          # Wi-Fi Hotspot
           wifi config
           uci set wireless.radio0.disabled='0'
           uci set wireless.default_radio0.mode='ap'
@@ -91,7 +141,7 @@ jobs:
           uci commit wireless
           wifi reload
 
-          # --- Auto Modem / SIM Card Setup ---
+          # Modem / SIM Card
           uci set network.wan_sim=interface
           uci set network.wan_sim.proto='modemmanager'
           uci set network.wan_sim.device='/sys/devices/platform/soc/78b7000.usb/modem'
@@ -99,25 +149,27 @@ jobs:
           uci set network.wan_sim.auth='none'
           uci commit network
 
-          # --- Enable ZRAM Swap (1GB RAM Compression) ---
+          # ZRAM Swap 1GB
           uci set system.@system[0].zram_size_mb='1024'
           uci commit system
 
-          # --- Auto Mount Partitions & SD Card ---
+          # Storage Mount
           uci set fstab.@global[0].anon_mount='1'
           uci set fstab.@global[0].auto_mount='1'
           uci set fstab.@global[0].auto_swap='1'
           uci commit fstab
 
-          # --- Enable Battery Bypass Service ---
+          # Enable Services
           /etc/init.d/battery-bypass enable
           /etc/init.d/battery-bypass start
+          /etc/init.d/led-status enable
+          /etc/init.d/led-status start
 
           exit 0
           CUSTOM_EOF
           chmod +x files/etc/uci-defaults/99-vince-custom
 
-          # 4. Rules Firewall TTL 64 (Bypass Hotspot Block)
+          # 6. Firewall TTL 64
           cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
           chain mangle_postrouting {
               type filter hook postrouting priority mangle; policy accept;
@@ -126,26 +178,22 @@ jobs:
           }
           NFT_EOF
 
-          # 5. Menyusun Pilihan Paket Lengkap ke .config
+          # 7. Menyusun Pilihan Paket Lengkap ke .config
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
 
-          # Drivers System & Hardware Vince
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_dropbear=y" >> .config
 
-          # TCP BBR, SQM & Akselerasi Internet
           echo "CONFIG_PACKAGE_kmod-tcp-bbr=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
 
-          # Wi-Fi Repeater & Travelmate Auto-Connect
           echo "CONFIG_PACKAGE_luci-app-travelmate=y" >> .config
           echo "CONFIG_PACKAGE_relayd=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-relay=y" >> .config
 
-          # Menu Web LuCI Apps
           echo "CONFIG_PACKAGE_luci-app-modemband=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-sms-tool-js=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
@@ -157,7 +205,6 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-statistics=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-ttyd=y" >> .config
 
-          # Engine Backend Tools & Utilities
           echo "CONFIG_PACKAGE_modemmanager=y" >> .config
           echo "CONFIG_PACKAGE_qmi-utils=y" >> .config
           echo "CONFIG_PACKAGE_mbim-utils=y" >> .config
@@ -176,7 +223,6 @@ jobs:
           echo "CONFIG_PACKAGE_fdisk=y" >> .config
           echo "CONFIG_PACKAGE_aria2=y" >> .config
 
-          # Audio Bluetooth
           echo "CONFIG_PACKAGE_bluez-daemon=y" >> .config
           echo "CONFIG_PACKAGE_alsa-utils=y" >> .config
           echo "CONFIG_PACKAGE_pulseaudio-daemon=y" >> .config
