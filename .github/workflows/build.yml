@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince (Auto Hotspot)
+name: Fast Build OpenWrt Vince
 
 on:
   workflow_dispatch:
@@ -12,30 +12,44 @@ jobs:
     container:
       image: ubuntu:22.04
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Complete Build Dependencies
+      - name: Install Build Dependencies
         run: |
           apt-get update
           apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git \
           libelf-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev
 
-      - name: Clone OpenWrt Repo & Update Feeds
+      - name: Clone OpenWrt Repo (Shallow Clone)
         run: |
           rm -rf openwrt
           git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
+
+      # Cache folder DL dan Ccache untuk mempercepat run berikutnya
+      - name: Cache OpenWrt Downloads & Tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/staging_dir/host
+          key: ${{ runner.os }}-openwrt-cache-${{ hashFiles('openwrt/include/toplevel.mk') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-cache-
+
+      - name: Update & Install Feeds
+        run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Setup Auto Hotspot & Packages
+      - name: Setup Auto Hotspot & Optimized Config
         run: |
           cd openwrt
           mkdir -p files/etc/uci-defaults
 
-          # Skrip uci-defaults agar Wi-Fi AP otomatis aktif tanpa sandi saat booting pertama
+          # Skrip uci-defaults agar Wi-Fi AP otomatis aktif tanpa sandi
           cat << 'WIFI_EOF' > files/etc/uci-defaults/99-autohotspot
           #!/bin/sh
           wifi config
@@ -49,24 +63,25 @@ jobs:
           WIFI_EOF
           chmod +x files/etc/uci-defaults/99-autohotspot
 
-          # Konfigurasi target MSM8953 (Vince) & Wi-Fi
+          # Konfigurasi ringkas & aktifkan CCache
           echo "CONFIG_TARGET_msm89xx=y" > .config
           echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
+          echo "CONFIG_DEVEL=y" >> .config
+          echo "CONFIG_CCACHE=y" >> .config
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
-          echo "CONFIG_PACKAGE_hostapd-common=y" >> .config
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_dropbear=y" >> .config
           
           make defconfig
 
-      - name: Build Firmware
+      - name: Compile Firmware
         run: |
           cd openwrt
-          make -j$(nproc) V=s || make -j1 V=s
+          make -j$(nproc) V=s
 
-      - name: Upload Firmware
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-vince-hotspot-firmware
+          name: openwrt-vince-fast-firmware
           path: openwrt/bin/targets/
