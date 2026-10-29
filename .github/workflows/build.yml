@@ -1,0 +1,65 @@
+name: Build OpenWrt Vince MSM8953
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  FORCE_UNSAFE_CONFIGURE: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git \
+          libelf-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
+          python3-dev rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev
+
+      - name: Clone OpenWrt Repo
+        run: |
+          rm -rf openwrt
+          git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Setup Auto Hotspot & Vince Config
+        run: |
+          cd openwrt
+          mkdir -p files/etc/uci-defaults
+
+          # Skrip uci-defaults agar Wi-Fi AP otomatis aktif tanpa sandi saat booting pertama
+          cat << 'WIFI_EOF' > files/etc/uci-defaults/99-autohotspot
+          #!/bin/sh
+          wifi config
+          uci set wireless.radio0.disabled='0'
+          uci set wireless.default_radio0.mode='ap'
+          uci set wireless.default_radio0.ssid='OpenWrt-Vince'
+          uci set wireless.default_radio0.encryption='none'
+          uci commit wireless
+          wifi reload
+          exit 0
+          WIFI_EOF
+          chmod +x files/etc/uci-defaults/99-autohotspot
+
+          make defconfig
+
+      - name: Compile Firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) V=s || make -j1 V=s
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-vince-firmware
+          path: openwrt/bin/targets/
