@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince Ultra (Auto SIM, Anti-Hotspot, Audio & Storage)
+name: Build OpenWrt Vince Super Monster Router
 
 on:
   push:
@@ -45,16 +45,16 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Inject Custom Configurations & Auto Scripts
+      - name: Inject Custom Configurations & All Super Tools
         run: |
           cd openwrt
           mkdir -p files/etc/uci-defaults files/etc/nftables.d
 
-          # 1. Skrip uci-defaults: Auto Hotspot Wi-Fi, Auto SIM APN, ZRAM & Mounting
+          # 1. Skrip uci-defaults: Auto Config Semua Fitur
           cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
 
-          # --- Enable Wi-Fi Hotspot ---
+          # --- Wi-Fi Hotspot ---
           wifi config
           uci set wireless.radio0.disabled='0'
           uci set wireless.default_radio0.mode='ap'
@@ -63,7 +63,7 @@ jobs:
           uci commit wireless
           wifi reload
 
-          # --- Auto Modem / SIM Card Setup ---
+          # --- Modem & SIM Auto Setup ---
           uci set network.wan_sim=interface
           uci set network.wan_sim.proto='modemmanager'
           uci set network.wan_sim.device='/sys/devices/platform/soc/78b7000.usb/modem'
@@ -71,11 +71,11 @@ jobs:
           uci set network.wan_sim.auth='none'
           uci commit network
 
-          # --- Enable ZRAM Swap (RAM Compression) ---
+          # --- ZRAM Swap (1GB RAM Compression) ---
           uci set system.@system[0].zram_size_mb='1024'
           uci commit system
 
-          # --- Auto Mount Partitions / SD Card ---
+          # --- Auto Mount MicroSD & Storage ---
           uci set fstab.@global[0].anon_mount='1'
           uci set fstab.@global[0].auto_mount='1'
           uci set fstab.@global[0].auto_swap='1'
@@ -85,7 +85,7 @@ jobs:
           CUSTOM_EOF
           chmod +x files/etc/uci-defaults/99-vince-custom
 
-          # 2. Aturan Firewall Anti-Tethering / Anti-Deteksi Hotspot (TTL = 64)
+          # 2. Firewall TTL 64 (Bypass Hotspot Block)
           cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
           chain mangle_postrouting {
               type filter hook postrouting priority mangle; policy accept;
@@ -94,43 +94,52 @@ jobs:
           }
           NFT_EOF
 
-          # 3. Masukkan Pilihan Konfigurasi Target & Paket ke .config
+          # 3. Masukkan Semua Pilihan Paket ke .config
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
 
-          # Wireless & Base System
+          # Wireless, System & GUI
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_dropbear=y" >> .config
 
-          # SIM & Modem 4G
+          # SIM Card 4G, ModemManager & Lock Band
           echo "CONFIG_PACKAGE_modemmanager=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
           echo "CONFIG_PACKAGE_qmi-utils=y" >> .config
           echo "CONFIG_PACKAGE_mbim-utils=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
+          echo "CONFIG_PACKAGE_sms-tool=y" >> .config
 
-          # Anti-Tethering & Firewall Mangle
+          # Bypass Hotspot & Firewall
           echo "CONFIG_PACKAGE_kmod-nft-offload=y" >> .config
           echo "CONFIG_PACKAGE_nftables=y" >> .config
 
-          # Kompresi Data, AdBlock & Memory Management
+          # Multi-WAN & WireGuard VPN
+          echo "CONFIG_PACKAGE_mwan3=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-mwan3=y" >> .config
+          echo "CONFIG_PACKAGE_wireguard=y" >> .config
+          echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
+
+          # Remote Access & Adblock
+          echo "CONFIG_PACKAGE_zerotier=y" >> .config
           echo "CONFIG_PACKAGE_simple-adblock=y" >> .config
           echo "CONFIG_PACKAGE_zram-swap=y" >> .config
 
-          # Storage & File System (Vendor, System, SD Card)
+          # Storage & Download Manager (NAS/Aria2)
           echo "CONFIG_PACKAGE_block-mount=y" >> .config
           echo "CONFIG_PACKAGE_kmod-fs-ext4=y" >> .config
           echo "CONFIG_PACKAGE_kmod-fs-f2fs=y" >> .config
           echo "CONFIG_PACKAGE_kmod-fs-exfat=y" >> .config
-          echo "CONFIG_PACKAGE_fdisk=y" >> .config
+          echo "CONFIG_PACKAGE_aria2=y" >> .config
 
-          # Bluetooth Audio Receiver & ALSA Sound
+          # Bluetooth Audio Receiver & Sound
           echo "CONFIG_PACKAGE_bluez-daemon=y" >> .config
           echo "CONFIG_PACKAGE_alsa-utils=y" >> .config
           echo "CONFIG_PACKAGE_pulseaudio-daemon=y" >> .config
+
+          # System Statistics & Thermal Monitor
+          echo "CONFIG_PACKAGE_luci-app-statistics=y" >> .config
 
           make defconfig
 
@@ -142,5 +151,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-vince-ultra-firmware
+          name: openwrt-vince-super-monster-firmware
           path: openwrt/bin/targets/
