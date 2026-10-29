@@ -218,7 +218,7 @@ jobs:
 
           make defconfig
 
-      # VALIDASI SAFETY GUARD ARSITEKTUR
+      # --- TAHAP VERIFIKASI PRA-BUILD (PRE-BUILD VERIFICATION) ---
       - name: Verify Architecture Safety Guard
         run: |
           cd openwrt
@@ -229,20 +229,30 @@ jobs:
           fi
           echo "::notice::[SUCCESS] Target terverifikasi: MSM89xx / MSM8953 (Xiaomi Vince)."
 
-      # EKSTRAK DAN TAMPAL MACRO ELFUTILS SEBELUM COMPILE
-      - name: Patch Unpacked Elfutils Obstack Source
+      - name: Verify Host Prerequisites
+        run: |
+          cd openwrt
+          make prereq
+
+      - name: Download Source Tarballs & Pre-Verify Dependencies
+        run: |
+          cd openwrt
+          make download -j8 || make download -j1
+
+      - name: Pre-extract and Patch Host Tools (Elfutils Fix)
         run: |
           cd openwrt
           make tools/elfutils/prepare
           find build_dir/host/elfutils* -type f \( -name "obstack.in.h" -o -name "obstack.h" \) -exec sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' {} +
           find build_dir/host/elfutils* -type f \( -name "obstack.in.h" -o -name "obstack.h" \) -exec sed -i 's/#if $/ #if 0/g' {} +
 
+      # --- KOMPILASI UTAMA ---
       - name: Compile Firmware
         run: |
           cd openwrt
           make -j$(nproc) V=s || make -j1 V=s
 
-      # VERIFIKASI FILE HASIL COMPILE SEBELUM UPLOAD
+      # --- VERIFIKASI PASCA-BUILD (POST-BUILD VERIFICATION) ---
       - name: Verify Generated Image Files
         run: |
           TARGET_DIR="openwrt/bin/targets/msm89xx/msm8953"
