@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince Master (Battery Bypass, Full Tools & Web GUI)
+name: Build OpenWrt Vince Master (Data Compression, BBR & Full Tools)
 
 on:
   push:
@@ -49,10 +49,10 @@ jobs:
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Inject Custom Auto-Configuration & Battery Bypass Scripts
+      - name: Inject Custom Auto-Configuration, BBR & Battery Bypass
         run: |
           cd openwrt
-          mkdir -p files/etc/uci-defaults files/etc/nftables.d files/etc/init.d
+          mkdir -p files/etc/uci-defaults files/etc/nftables.d files/etc/init.d files/etc/sysctl.d
 
           # 1. Skrip Battery Bypass & Charge Protection Service
           cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
@@ -60,7 +60,6 @@ jobs:
           START=99
 
           start() {
-              # Nonaktifkan verifikasi suhu/keberadaan baterai jika dilepas (Direct USB Power)
               if [ -d /sys/class/power_supply/battery ]; then
                   echo 0 > /sys/class/power_supply/battery/charging_enabled 2>/dev/null || true
                   echo 1 > /sys/class/power_supply/battery/input_suspend 2>/dev/null || true
@@ -69,7 +68,17 @@ jobs:
           BATTERY_EOF
           chmod +x files/etc/init.d/battery-bypass
 
-          # 2. Skrip uci-defaults: Otomatisasi Hotspot, Auto SIM, ZRAM, Storage
+          # 2. Sysctl Optimasi BBR & Fast TCP Data Compression
+          cat << 'SYSCTL_EOF' > files/etc/sysctl.d/99-network-speed.conf
+          net.core.default_qdisc=fq
+          net.ipv4.tcp_congestion_control=bbr
+          net.ipv4.tcp_fastopen=3
+          net.ipv4.tcp_syncookies=1
+          net.ipv4.tcp_rmem=4096 87380 67108864
+          net.ipv4.tcp_wmem=4096 65536 67108864
+          SYSCTL_EOF
+
+          # 3. Skrip uci-defaults: Hotspot, Auto SIM, ZRAM, Storage & AdBlock
           cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
 
@@ -108,7 +117,7 @@ jobs:
           CUSTOM_EOF
           chmod +x files/etc/uci-defaults/99-vince-custom
 
-          # 3. Rules Firewall TTL 64 (Bypass Hotspot Block)
+          # 4. Rules Firewall TTL 64 (Bypass Hotspot Block)
           cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
           chain mangle_postrouting {
               type filter hook postrouting priority mangle; policy accept;
@@ -117,17 +126,21 @@ jobs:
           }
           NFT_EOF
 
-          # 4. Menyusun Pilihan Paket Lengkap ke .config
+          # 5. Menyusun Pilihan Paket Lengkap ke .config
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
 
-          # Drivers System & Hardware Vince (MSM8953 / Qualcomm)
+          # Drivers System & Hardware Vince
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_dropbear=y" >> .config
 
-          # Menu Web LuCI Apps (Tampilan Dashboard Chrome)
+          # TCP BBR, SQM & Akselerasi Internet
+          echo "CONFIG_PACKAGE_kmod-tcp-bbr=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
+
+          # Menu Web LuCI Apps
           echo "CONFIG_PACKAGE_luci-app-modemband=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-sms-tool-js=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
@@ -158,7 +171,7 @@ jobs:
           echo "CONFIG_PACKAGE_fdisk=y" >> .config
           echo "CONFIG_PACKAGE_aria2=y" >> .config
 
-          # Audio Bluetooth & Audio Switching
+          # Audio Bluetooth
           echo "CONFIG_PACKAGE_bluez-daemon=y" >> .config
           echo "CONFIG_PACKAGE_alsa-utils=y" >> .config
           echo "CONFIG_PACKAGE_pulseaudio-daemon=y" >> .config
