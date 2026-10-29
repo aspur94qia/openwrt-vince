@@ -52,16 +52,19 @@ jobs:
         run: |
           cd openwrt
           mkdir -p tools/elfutils/patches
-          cat << 'PATCH_EOF' > tools/elfutils/patches/001-fix-obstack.patch
---- a/libgnu/obstack.in.h
-+++ b/libgnu/obstack.in.h
-@@ -140,7 +140,7 @@
-    (void) 0; })
- 
--#if @HAVE_OBSTACK_PRINTF@
-+#if 0
- # ifdefine HAVE_OBSTACK_PRINTF
-PATCH_EOF
+          python3 -c "
+          patch_content = '''--- a/libgnu/obstack.in.h
+          +++ b/libgnu/obstack.in.h
+          @@ -140,7 +140,7 @@
+             (void) 0; })
+
+          -#if @HAVE_OBSTACK_PRINTF@
+          +#if 0
+           # ifdefine HAVE_OBSTACK_PRINTF
+          '''
+          with open('tools/elfutils/patches/001-fix-obstack.patch', 'w') as f:
+              f.write(patch_content)
+          "
 
       - name: Inject Configuration & Lock Target MSM8953
         run: |
