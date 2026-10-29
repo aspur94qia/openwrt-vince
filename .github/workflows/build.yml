@@ -24,7 +24,7 @@ jobs:
 
       - name: Clone OpenWrt Repo & Update Feeds
         run: |
-          git clone --depth 1 https://github.com/akbar-npj/msm8916-openwrt.git openwrt || \
+          rm -rf openwrt
           git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt
           cd openwrt
           ./scripts/feeds update -a
