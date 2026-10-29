@@ -1,25 +1,89 @@
-name: Build OpenWrt Vince via True Image Builder
+name: Build OpenWrt Vince via Generated Image Builder
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  FORCE_UNSAFE_CONFIGURE: 1
+
 jobs:
   build-ib:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install Complete Build Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
-          zlib1g-dev gawk git gettext libssl-dev xsltproc rsync unzip python3 wget curl
+          apt-get update
+          apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
+          libelf-dev libdw-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
+          python3-dev python3-pyelftools libpython3-dev rsync subversion swig time u-boot-tools \
+          device-tree-compiler unzip wget curl flex bison ca-certificates xsltproc zlib1g-dev
+
+      - name: Clone OpenWrt Repo & Verify Target
+        run: |
+          rm -rf openwrt
+          git clone --depth 1 https://github.com/lkiuyu/immortalwrt.git openwrt
+          if [ ! -d "openwrt/target/linux/msm89xx" ]; then
+            echo "::error::[VERIFIKASI GAGAL] Subtarget msm89xx tidak ditemukan dalam repositori!"
+            exit 1
+          fi
+          echo "::notice::[VERIFIKASI SUKSES] Repositori OpenWrt MSM89xx berhasil dikloning."
+
+      - name: Inject Fix for Elfutils Obstack Error & Verify
+        run: |
+          cd openwrt
+          python3 -c "
+          hook = '''
+          define Host/Configure/Pre/FixObstack
+          \tsed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.in.h
+          endef
+
+          define Host/Configure/Post/FixObstack
+          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
+          endef
+
+          define Host/Compile/Pre/FixObstack
+          \tsed -i -E 's/#if[[:space:]]*\$$/#if 0/g' \$(HOST_BUILD_DIR)/libgnu/obstack.h 2>/dev/null || true
+          endef
+
+          Hooks/HostConfigure/Pre += Host/Configure/Pre/FixObstack
+          Hooks/HostConfigure/Post += Host/Configure/Post/FixObstack
+          Hooks/HostCompile/Pre += Host/Compile/Pre/FixObstack
+          '''
+          with open('tools/elfutils/Makefile', 'a') as f:
+              f.write(hook)
+          "
+          if ! grep -q "FixObstack" tools/elfutils/Makefile; then
+            echo "::error::[VERIFIKASI GAGAL] Patch hook elfutils gagal disuntikkan!"
+            exit 1
+          fi
+          echo "::notice::[VERIFIKASI SUKSES] Patch hook elfutils terpasang sempurna."
+
+      - name: Update & Install Feeds + Custom LuCI Apps & Verify
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          for repo in luci-app-sms-tool-js luci-app-modemband; do
+            if ! find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
+              git clone --depth 1 "https://github.com/4nhung/$repo.git" "package/$repo" || true
+            fi
+            if [ -d "package/$repo" ] || find feeds -maxdepth 4 -type d -name "$repo" | grep -q .; then
+              echo "::notice::[VERIFIKASI SUKSES] Paket $repo siap disuntikkan."
+            fi
+          done
 
       - name: Setup Custom Files & Verify Presence
         run: |
+          cd openwrt
           mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
 
           # 1. LED Status Monitor Daemon
@@ -143,15 +207,6 @@ jobs:
           }
           NFT_EOF
 
-          # Inject LuCI Apps Kustom
-          git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git /tmp/sms-tool || true
-          [ -d /tmp/sms-tool/htdocs ] && cp -rf /tmp/sms-tool/htdocs/* files/ 2>/dev/null || true
-          [ -d /tmp/sms-tool/root ] && cp -rf /tmp/sms-tool/root/* files/ 2>/dev/null || true
-
-          git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git /tmp/modemband || true
-          [ -d /tmp/modemband/htdocs ] && cp -rf /tmp/modemband/htdocs/* files/ 2>/dev/null || true
-          [ -d /tmp/modemband/root ] && cp -rf /tmp/modemband/root/* files/ 2>/dev/null || true
-
           # VERIFIKASI FISIK FILE KUSTOM
           for f in files/usr/bin/led-status-monitor.sh \
                    files/etc/init.d/led-status \
@@ -166,54 +221,119 @@ jobs:
           done
           echo "::notice::[VERIFIKASI SUKSES] Seluruh file kustom terverifikasi 100%."
 
-      - name: Download & Extract Standalone Image Builder
+      - name: Build Standalone Image Builder Package
         run: |
-          mkdir -p ib
-          cd ib
+          cd openwrt
+
+          cat << 'CONFIG_EOF' > .config
+          CONFIG_TARGET_msm89xx=y
+          CONFIG_TARGET_ALL_PROFILES=y
+          CONFIG_TARGET_IMAGEBUILDER=y
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
+          CONFIG_PACKAGE_luci-compat=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_dropbear=y
+
+          CONFIG_PACKAGE_kmod-wcn36xx=y
+          CONFIG_PACKAGE_hostapd=y
+
+          CONFIG_PACKAGE_kmod-tcp-bbr=y
+          CONFIG_PACKAGE_sqm-scripts=y
+          CONFIG_PACKAGE_luci-app-sqm=y
+
+          CONFIG_PACKAGE_luci-app-travelmate=y
+          CONFIG_PACKAGE_relayd=y
+          CONFIG_PACKAGE_luci-proto-relay=y
+
+          CONFIG_PACKAGE_modemmanager=y
+          CONFIG_PACKAGE_luci-proto-modemmanager=y
+          CONFIG_PACKAGE_qmi-utils=y
+          CONFIG_PACKAGE_mbim-utils=y
+          CONFIG_PACKAGE_sms-tool=y
+          CONFIG_PACKAGE_luci-app-modemband=y
+          CONFIG_PACKAGE_luci-app-sms-tool-js=y
+          CONFIG_PACKAGE_usb-modeswitch=y
+          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
+          CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
+          CONFIG_PACKAGE_kmod-usb-net-rndis=y
+          CONFIG_PACKAGE_kmod-usb-serial-option=y
+          CONFIG_PACKAGE_kmod-usb-serial-qualcomm=y
+
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-usb2=y
+          CONFIG_PACKAGE_kmod-usb3=y
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-f2fs=y
+          CONFIG_PACKAGE_kmod-fs-exfat=y
+          CONFIG_PACKAGE_fdisk=y
+
+          CONFIG_PACKAGE_kmod-nft-offload=y
+          CONFIG_PACKAGE_mwan3=y
+          CONFIG_PACKAGE_luci-app-mwan3=y
+          CONFIG_PACKAGE_wireguard-tools=y
+          CONFIG_PACKAGE_kmod-wireguard=y
+          CONFIG_PACKAGE_luci-proto-wireguard=y
+          CONFIG_PACKAGE_zerotier=y
+          CONFIG_PACKAGE_luci-app-zerotier=y
+
+          CONFIG_PACKAGE_zram-swap=y
+          CONFIG_PACKAGE_aria2=y
+          CONFIG_PACKAGE_luci-app-aria2=y
+          CONFIG_PACKAGE_luci-app-statistics=y
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          CONFIG_EOF
+
+          make defconfig
+
+          # Build tools, toolchain, dan buat paket Image Builder
+          make tools/install -j$(nproc) V=s || make tools/install -j1 V=s
+          make toolchain/install -j$(nproc) V=s || make toolchain/install -j1 V=s
+          make target/imagebuilder/install -j$(nproc) V=s || make target/imagebuilder/install -j1 V=s
+
+      - name: Extract Generated Image Builder & Run Image Assembly
+        run: |
+          cd openwrt
+          IB_TAR=$(find bin/targets/msm89xx/ -name "openwrt-imagebuilder-*.tar.xz" | head -n 1)
+
+          if [ -z "$IB_TAR" ]; then
+            echo "::error::[VERIFIKASI GAGAL] Berkas Image Builder tarball tidak tergenerasi!"
+            exit 1
+          fi
+
+          echo "::notice::[VERIFIKASI SUKSES] Berkas Image Builder ditemukan: $IB_TAR"
           
-          # Ambil URL Image Builder msm89xx pre-compiled
-          IB_URL="https://downloads.openwrt.org/snapshots/targets/msm89xx/msm8953/openwrt-imagebuilder-msm89xx-msm8953.Linux-x86_64.tar.xz"
-          
-          echo "Downloading Image Builder tarball from $IB_URL..."
-          wget -q "$IB_URL" -O ib.tar.xz || wget -q "https://github.com/lkiuyu/immortalwrt/releases/download/vince/openwrt-imagebuilder-msm89xx.tar.xz" -O ib.tar.xz
+          mkdir -p /tmp/ib
+          tar -xf "$IB_TAR" -C /tmp/ib --strip-components=1
+          cp -rf files /tmp/ib/files
 
-          tar -xf ib.tar.xz --strip-components=1
-          rm -f ib.tar.xz
+          cd /tmp/ib
+          VINCE_PROFILE=$(grep -rn "DEVICE.*vince" target/linux/msm89xx/ 2>/dev/null | head -n 1 | sed -n 's/.*Device\/\(.*\)/\1/p')
+          [ -z "$VINCE_PROFILE" ] && VINCE_PROFILE="xiaomi_vince"
 
-          cp -rf ../files .
+          echo "::notice::Menjalankan Image Builder Engine untuk profile: $VINCE_PROFILE"
+          make image PROFILE="$VINCE_PROFILE" FILES="files" V=s || make image FILES="files" V=s
 
-      - name: Build Firmware via Standalone Image Builder Engine
+          # Pindahkan hasil image ke folder artifact
+          mkdir -p $GITHUB_WORKSPACE/openwrt/bin/targets/msm89xx/
+          cp -rf bin/targets/msm89xx/* $GITHUB_WORKSPACE/openwrt/bin/targets/msm89xx/
+
+      - name: Verify Final Firmware Images
         run: |
-          cd ib
-
-          PACKAGES="luci luci-compat dropbear \
-          kmod-wcn36xx hostapd \
-          kmod-tcp-bbr sqm-scripts luci-app-sqm \
-          luci-app-travelmate relayd luci-proto-relay \
-          modemmanager luci-proto-modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch \
-          kmod-usb-net-qmi-wwan kmod-usb-net-cdc-ether kmod-usb-net-rndis kmod-usb-serial-option kmod-usb-serial-qualcomm \
-          kmod-usb-storage kmod-usb2 kmod-usb3 block-mount kmod-fs-ext4 kmod-fs-f2fs kmod-fs-exfat fdisk \
-          kmod-nft-offload mwan3 luci-app-mwan3 wireguard-tools kmod-wireguard luci-proto-wireguard zerotier luci-app-zerotier \
-          zram-swap aria2 luci-app-aria2 luci-app-statistics luci-app-ttyd"
-
-          # Eksekusi Image Builder Murni
-          make image PROFILE="xiaomi_vince" PACKAGES="$PACKAGES" FILES="files" || make image PACKAGES="$PACKAGES" FILES="files"
-
-      - name: Verify Generated Images
-        run: |
-          cd ib
-          echo "=== Verifikasi Hasil File Image ==="
+          cd openwrt
+          echo "=== Memeriksa File Hasil Image Builder ==="
           ls -la bin/targets/msm89xx/* 2>/dev/null || true
 
           IMAGE_COUNT=$(find bin/targets/msm89xx/ -type f \( -name "*.img" -o -name "*.bin" -o -name "*squashfs*" \) 2>/dev/null | wc -l)
           if [ "$IMAGE_COUNT" -eq 0 ]; then
-            echo "::error::[VERIFIKASI GAGAL] Tidak ditemukan file image firmware di bin/targets/msm89xx!"
+            echo "::error::[VERIFIKASI GAGAL] Tidak ditemukan file firmware di bin/targets/msm89xx!"
             exit 1
           fi
-          echo "::notice::[VERIFIKASI SUKSES] Standalone Image Builder berhasil membuat $IMAGE_COUNT file image."
+          echo "::notice::[VERIFIKASI SUKSES] Image Builder berhasil membuat $IMAGE_COUNT file firmware."
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-vince-ib-firmware
-          path: ib/bin/targets/
+          path: openwrt/bin/targets/
