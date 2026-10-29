@@ -20,11 +20,10 @@ jobs:
       - name: Install Complete Build Dependencies
         run: |
           apt-get update
-          apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git \
-          libelf-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
+          apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext autopoint \
+          libelf-dev libdw-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev
 
-      # MENGGUNAKAN REPO FORK KHUSUS TARGET MSM89XX / SNAPDRAGON
       - name: Clone OpenWrt Repo (MSM89xx Supported Fork)
         run: |
           rm -rf openwrt
@@ -48,6 +47,12 @@ jobs:
 
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
+
+      - name: Fix Host Tools (Elfutils Obstack Macro Fix)
+        run: |
+          cd openwrt
+          # Perbaikan bug obstack.h pada elfutils host tool
+          find tools/elfutils/ -type f -name "*.in" -o -name "*.h" -o -name "Makefile*" | xargs sed -i 's/@HAVE_OBSTACK_PRINTF@/0/g' 2>/dev/null || true
 
       - name: Inject Configuration & Lock Target MSM8953
         run: |
@@ -167,9 +172,10 @@ jobs:
           echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
           echo "CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
 
-          # Opsi Kompilasi & Paket
+          # Opsi Kompilasi & Modul LuCI Compatibility
           echo "CONFIG_DEVEL=y" >> .config
           echo "CONFIG_CCACHE=y" >> .config
+          echo "CONFIG_PACKAGE_luci-compat=y" >> .config
 
           echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
           echo "CONFIG_PACKAGE_hostapd=y" >> .config
@@ -224,7 +230,6 @@ jobs:
           cd openwrt
           if ! grep -q "CONFIG_TARGET_msm89xx=y" .config; then
             echo "::error::[FATAL ERROR] Arsitektur salah! Target bukan MSM89xx/MSM8953 (Xiaomi Vince)."
-            echo "Target terdeteksi di .config:"
             grep "CONFIG_TARGET_" .config | head -n 5
             exit 1
           fi
@@ -234,6 +239,25 @@ jobs:
         run: |
           cd openwrt
           make -j$(nproc) V=s || make -j1 V=s
+
+      # VERIFIKASI FILE HASIL COMPILE SEBELUM UPLOAD
+      - name: Verify Generated Image Files
+        run: |
+          TARGET_DIR="openwrt/bin/targets/msm89xx/msm8953"
+          if [ ! -d "$TARGET_DIR" ]; then
+            echo "::error::[FATAL ERROR] Folder hasil compile $TARGET_DIR tidak ditemukan!"
+            exit 1
+          fi
+
+          echo "=== DAFTAR FILE HASIL BUILD ==="
+          ls -lh $TARGET_DIR/
+
+          BOOT_EXISTS=$(find $TARGET_DIR -name "*boot*.img" -o -name "*kernel*.bin" -o -name "*vmlinuz*" | head -n 1)
+          if [ -z "$BOOT_EXISTS" ]; then
+            echo "::error::[FATAL ERROR] File boot/kernel tidak ditemukan di $TARGET_DIR!"
+            exit 1
+          fi
+          echo "::notice::[SUCCESS] File image untuk Xiaomi Vince tervalidasi dan siap dipasang!"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
