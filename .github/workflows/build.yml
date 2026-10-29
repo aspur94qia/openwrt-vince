@@ -48,12 +48,6 @@ jobs:
           git clone --depth 1 https://github.com/4nhung/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4nhung/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Fix Host Tools (Elfutils Obstack Configure Fix)
-        run: |
-          cd openwrt
-          # Paksa configure elfutils memberikan nilai 0 pada obstack_printf agar obstack.h tidak error #if kosong
-          echo 'HOST_CONFIGURE_VARS += ac_cv_func_obstack_printf=0' >> tools/elfutils/Makefile
-
       - name: Inject Configuration & Lock Target MSM8953
         run: |
           cd openwrt
@@ -234,6 +228,14 @@ jobs:
             exit 1
           fi
           echo "::notice::[SUCCESS] Target terverifikasi: MSM89xx / MSM8953 (Xiaomi Vince)."
+
+      # EKSTRAK DAN TAMPAL MACRO ELFUTILS SEBELUM COMPILE
+      - name: Patch Unpacked Elfutils Obstack Source
+        run: |
+          cd openwrt
+          make tools/elfutils/prepare
+          find build_dir/host/elfutils* -type f \( -name "obstack.in.h" -o -name "obstack.h" \) -exec sed -i 's/#if @HAVE_OBSTACK_PRINTF@/#if 0/g' {} +
+          find build_dir/host/elfutils* -type f \( -name "obstack.in.h" -o -name "obstack.h" \) -exec sed -i 's/#if $/ #if 0/g' {} +
 
       - name: Compile Firmware
         run: |
