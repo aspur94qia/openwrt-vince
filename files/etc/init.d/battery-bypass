@@ -1,0 +1,8 @@
+#!/bin/sh /etc/rc.common
+START=99
+start() {
+    B=/sys/class/power_supply/battery
+    [ -d "$B" ] || return 0
+    echo 0 > "$B/input_suspend" 2>/dev/null || true
+    echo 0 > "$B/charging_enabled" 2>/dev/null || true
+}

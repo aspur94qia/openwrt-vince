@@ -1,0 +1,5 @@
+chain mangle_postrouting_ttl64 {
+    type filter hook postrouting priority 300; policy accept;
+    counter ip ttl set 64
+    counter ip6 hoplimit set 64
+}

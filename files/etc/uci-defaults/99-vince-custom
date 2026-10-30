@@ -1,0 +1,22 @@
+#!/bin/sh
+printf '%s\n%s\n' 'vince12345' 'vince12345' | passwd root >/dev/null 2>&1
+uci set network.lan.ipaddr='192.168.1.1'
+uci set network.lan.netmask='255.255.255.0'
+uci commit network
+for r in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p'); do
+    uci set wireless.$r.disabled='0'
+done
+for i in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    uci set wireless.$i.mode='ap'
+    uci set wireless.$i.network='lan'
+    uci set wireless.$i.ssid='OpenWrt-Vince'
+    uci set wireless.$i.encryption='psk2'
+    uci set wireless.$i.key='vince12345'
+    uci set wireless.$i.disabled='0'
+done
+uci commit wireless
+/etc/init.d/battery-bypass enable
+/etc/init.d/battery-bypass start
+/etc/init.d/led-status enable
+/etc/init.d/led-status start
+exit 0

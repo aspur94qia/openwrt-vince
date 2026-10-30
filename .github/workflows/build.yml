@@ -1,4 +1,4 @@
-name: Build OpenWrt Vince Master MSM8953
+name: Build OpenWrt Vince Complete
 
 on:
   push:
@@ -63,18 +63,13 @@ jobs:
               f.write(hook)
           "
 
-      - name: Update Feeds & Clone Custom LuCI Apps
+      - name: Update Feeds & Install All Requested Tools & LuCI Apps
         run: |
           cd openwrt
           ./scripts/feeds update -a
-          ./scripts/feeds install libffi
-          ./scripts/feeds install luci luci-compat luci-proto-modemmanager luci-proto-relay luci-proto-wireguard
-          ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch
-          ./scripts/feeds install sqm-scripts luci-app-sqm luci-app-travelmate relayd mwan3 luci-app-mwan3
-          ./scripts/feeds install wireguard-tools zerotier luci-app-zerotier zram-swap aria2 luci-app-aria2
-          ./scripts/feeds install luci-app-statistics luci-app-ttyd
-
-          # Clone LuCI kustom 4IceG langsung ke folder package agar terbaca defconfig
+          ./scripts/feeds install libffi zlib libopenssl libubox ubus uci json-c blobmsg-json
+          ./scripts/feeds install -a -p packages
+          ./scripts/feeds install -a -p luci
           git clone --depth 1 https://github.com/4IceG/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
           git clone --depth 1 https://github.com/4IceG/luci-app-modemband.git package/luci-app-modemband || true
 
@@ -82,142 +77,11 @@ jobs:
         run: |
           cd openwrt
           mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
+          cp -r ../files/* files/
 
-          # 1. LED Status Monitor Daemon
-          cat << 'LED_SCRIPT' > files/usr/bin/led-status-monitor.sh
-          #!/bin/sh
-          LED_DIR="/sys/class/leds/white:status"
-          if [ ! -f "$LED_DIR/brightness" ]; then
-              LED_DIR=$(ls -d /sys/class/leds/* 2>/dev/null | grep -viE 'flash|torch|backlight|lcd|button|kbd' | head -n 1)
-          fi
-          LED="$LED_DIR/brightness"
-          [ -f "$LED" ] || exit 0
-
-          blink() {
-              COUNT=$1
-              DELAY=${2:-0.2}
-              for i in $(seq 1 $COUNT); do
-                  echo 255 > "$LED" 2>/dev/null
-                  sleep $DELAY
-                  echo 0 > "$LED" 2>/dev/null
-                  sleep $DELAY
-              done
-          }
-
-          while true; do
-              AP_ACTIVE=$(ubus call network.wireless status 2>/dev/null | grep -c '"up": true')
-              SIM_UP=$(ifstatus wan_sim 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)
-
-              if [ "$AP_ACTIVE" -gt 0 ]; then
-                  blink 3 0.15
-                  sleep 1.5
-              elif [ "$SIM_UP" = "true" ]; then
-                  blink 1 0.2
-                  sleep 1.5
-              else
-                  blink 5 0.1
-                  sleep 1
-              fi
-          done
-          LED_SCRIPT
-          chmod +x files/usr/bin/led-status-monitor.sh
-
-          # 2. Service LED
-          cat << 'LED_SERVICE' > files/etc/init.d/led-status
-          #!/bin/sh /etc/rc.common
-          START=99
-          USE_PROCD=1
-          start_service() {
-              procd_open_instance
-              procd_set_param command /usr/bin/led-status-monitor.sh
-              procd_set_param respawn
-              procd_close_instance
-          }
-          LED_SERVICE
-          chmod +x files/etc/init.d/led-status
-
-          # 3. Battery Bypass
-          cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
-          #!/bin/sh /etc/rc.common
-          START=99
-          start() {
-              B=/sys/class/power_supply/battery
-              [ -d "$B" ] || return 0
-              echo 0 > "$B/input_suspend" 2>/dev/null || true
-              echo 0 > "$B/charging_enabled" 2>/dev/null || true
-          }
-          BATTERY_EOF
-          chmod +x files/etc/init.d/battery-bypass
-
-          # 4. Sysctl BBR
-          cat << 'SYSCTL_EOF' > files/etc/sysctl.d/99-network-speed.conf
-          net.core.default_qdisc=fq
-          net.ipv4.tcp_congestion_control=bbr
-          net.ipv4.tcp_fastopen=3
-          SYSCTL_EOF
-
-          # 5. uci-defaults First-Boot Config
-          cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
-          #!/bin/sh
-          printf '%s\n%s\n' '__ROOT_PASS__' '__ROOT_PASS__' | passwd root >/dev/null 2>&1
-          uci set network.lan.ipaddr='192.168.1.1'
-          uci set network.lan.netmask='255.255.255.0'
-          if [ "$(uci -q get network.@device[0].name)" = "br-lan" ]; then
-              uci -q del_list network.@device[0].ports='usb0'
-              uci add_list network.@device[0].ports='usb0'
-          fi
-          uci commit network
-
-          wifi config
-          for r in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p'); do
-              uci set wireless.$r.disabled='0'
-          done
-          for i in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
-              uci set wireless.$i.mode='ap'
-              uci set wireless.$i.network='lan'
-              uci set wireless.$i.ssid='__WIFI_SSID__'
-              uci set wireless.$i.encryption='psk2'
-              uci set wireless.$i.key='__WIFI_KEY__'
-              uci set wireless.$i.disabled='0'
-          done
-          uci commit wireless
-
-          MODEM_DEV=$(readlink -f /sys/class/net/wwan0/device 2>/dev/null)
-          uci set network.wan_sim=interface
-          uci set network.wan_sim.proto='modemmanager'
-          [ -n "$MODEM_DEV" ] && uci set network.wan_sim.device="$MODEM_DEV"
-          uci set network.wan_sim.apn='internet'
-          uci set network.wan_sim.auth='none'
-          uci commit network
-
-          uci add_list firewall.@zone[1].network='wan_sim'
-          uci commit firewall
-
-          uci set system.@system[0].zram_size_mb='1024'
-          uci commit system
-
-          /etc/init.d/battery-bypass enable
-          /etc/init.d/battery-bypass start
-          /etc/init.d/led-status enable
-          /etc/init.d/led-status start
-          exit 0
-          CUSTOM_EOF
-          sed -i "s#__ROOT_PASS__#${ROOT_PASS}#g; s#__WIFI_SSID__#${WIFI_SSID}#g; s#__WIFI_KEY__#${WIFI_KEY}#g" files/etc/uci-defaults/99-vince-custom
-          chmod +x files/etc/uci-defaults/99-vince-custom
-
-          # 6. TTL 64
-          cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
-          chain mangle_postrouting_ttl64 {
-              type filter hook postrouting priority 300; policy accept;
-              counter ip ttl set 64
-              counter ip6 hoplimit set 64
-          }
-          NFT_EOF
-
-      - name: Inject Native Configuration Target MSM89xx
+      - name: Inject Full Configuration Target MSM89xx with All Tools
         run: |
           cd openwrt
-
           cat << 'CONFIG_EOF' > .config
           CONFIG_TARGET_msm89xx=y
           CONFIG_TARGET_ALL_PROFILES=y
@@ -270,7 +134,6 @@ jobs:
           CONFIG_PACKAGE_glib2=y
           CONFIG_PACKAGE_glib2-gobject=y
           CONFIG_EOF
-
           make defconfig
 
       - name: Download Sources
