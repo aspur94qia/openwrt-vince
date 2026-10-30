@@ -69,7 +69,7 @@ jobs:
           cd openwrt
           ./scripts/feeds update -a
 
-          # HANYA pasang paket yang dibutuhkan (Mencegah warning libffi/audio-support)
+          # HANYA pasang paket yang dibutuhkan
           ./scripts/feeds install luci luci-compat
           ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch
           ./scripts/feeds install sqm-scripts luci-app-sqm
@@ -290,10 +290,19 @@ jobs:
           fi
           echo "::notice::[SUKSES] Target MSM89xx terkonfigurasi dengan benar."
 
-      - name: Download Build Source Packages
+      - name: Download Build Source Packages (Bypass 403 & Mirror Fallback)
         run: |
           cd openwrt
-          make download -j8 V=s || make download -j1 V=s
+          
+          # Patch scripts/download.pl untuk menyuntikkan User-Agent Browser
+          sed -i 's/wget -t/wget --user-agent="Mozilla\/5.0 (X11; Linux x86_64; rv:120.0) Gecko\/20100101 Firefox\/120.0" -t/g' scripts/download.pl 2>/dev/null || true
+          
+          # Aktifkan backup mirror di .config
+          echo "CONFIG_MIRROR_TARBALLS=y" >> .config
+
+          # Jalankan pengunduhan dengan User-Agent kustom
+          make download -j8 WGET="wget --user-agent='Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0'" V=s || \
+          make download -j1 WGET="wget --user-agent='Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0'" V=s
 
       - name: Compile Firmware
         run: |
