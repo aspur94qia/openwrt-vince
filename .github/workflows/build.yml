@@ -63,17 +63,16 @@ jobs:
               f.write(hook)
           "
 
-      - name: Update Feeds & Install All Dependencies & Custom LuCI Apps
+      - name: Update Feeds & Clone Custom LuCI Apps
         run: |
           cd openwrt
           ./scripts/feeds update -a
-          
-          # Install dependensi dasar dan pustaka sistem secara lengkap untuk mencegah missing libffi/glib2
-          ./scripts/feeds install libffi zlib libopenssl libubox ubus uci json-c blobmsg-json
-          
-          # Install seluruh paket router, network, protocol, dan LuCI dasar
-          ./scripts/feeds install -a -p packages
-          ./scripts/feeds install -a -p luci
+          ./scripts/feeds install libffi
+          ./scripts/feeds install luci luci-compat luci-proto-modemmanager luci-proto-relay luci-proto-wireguard
+          ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch
+          ./scripts/feeds install sqm-scripts luci-app-sqm luci-app-travelmate relayd mwan3 luci-app-mwan3
+          ./scripts/feeds install wireguard-tools zerotier luci-app-zerotier zram-swap aria2 luci-app-aria2
+          ./scripts/feeds install luci-app-statistics luci-app-ttyd
 
           # Clone LuCI kustom 4IceG langsung ke folder package agar terbaca defconfig
           git clone --depth 1 https://github.com/4IceG/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
