@@ -1,35 +1,26 @@
-name: Build OpenWrt Vince (Port MSM8953)
+name: Build OpenWrt Vince Master MSM8953
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 env:
   FORCE_UNSAFE_CONFIGURE: 1
   FORK_URL: https://github.com/lkiuyu/immortalwrt
   FORK_BRANCH: master
-  MAX_ATTEMPTS: 8
-  BUILD_BUDGET_MIN: 320
   WIFI_SSID: OpenWrt-Vince
   WIFI_KEY: ${{ secrets.WIFI_KEY || 'vince12345' }}
   ROOT_PASS: ${{ secrets.ROOT_PASS || 'vince12345' }}
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 355
+    timeout-minutes: 360
     container:
       image: ubuntu:22.04
     steps:
-      - name: Install Complete Build Dependencies
+      - name: Install Build Dependencies
         run: |
           apt-get update
           apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
@@ -37,7 +28,7 @@ jobs:
           python3-dev python3-pyelftools libpython3-dev rsync subversion swig time u-boot-tools \
           device-tree-compiler unzip wget curl zstd flex bison ca-certificates xsltproc zlib1g-dev
 
-      - name: Checkout Repository (overlay + ci)
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Clone OpenWrt Fork
@@ -45,20 +36,10 @@ jobs:
           rm -rf openwrt
           git clone --depth 1 -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
-      - name: Restore Download & ccache Cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            openwrt/dl
-            openwrt/.ccache
-          key: openwrt-vince-${{ github.run_id }}
-          restore-keys: |
-            openwrt-vince-
-
-      - name: Inject Triple-Hook Fix for Elfutils Obstack Error
+      - name: Inject Fix for Elfutils Obstack Error
         run: |
           cd openwrt
-          [ -f tools/elfutils/Makefile ] || { echo "tools/elfutils tidak ada, lewati"; exit 0; }
+          [ -f tools/elfutils/Makefile ] || exit 0
           python3 -c "
           hook = '''
           define Host/Configure/Pre/FixObstack
@@ -82,44 +63,26 @@ jobs:
               f.write(hook)
           "
 
-      - name: Update Feeds & Install Selected Packages ONLY
+      - name: Update Feeds & Clone Custom LuCI Apps
         run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install luci luci-compat luci-proto-modemmanager luci-proto-relay luci-proto-wireguard
-          ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool modemband usb-modeswitch
+          ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch
           ./scripts/feeds install sqm-scripts luci-app-sqm luci-app-travelmate relayd mwan3 luci-app-mwan3
           ./scripts/feeds install wireguard-tools zerotier luci-app-zerotier zram-swap aria2 luci-app-aria2
           ./scripts/feeds install luci-app-statistics luci-app-ttyd
 
-          for repo in luci-app-sms-tool-js luci-app-modemband; do
-            if [ -z "$(find feeds -maxdepth 4 -type d -name "$repo" -print -quit)" ]; then
-              git clone --depth 1 "https://github.com/4IceG/$repo.git" "package/$repo" || true
-            fi
-          done
+          # Clone LuCI kustom 4IceG langsung ke folder package agar terbaca defconfig
+          git clone --depth 1 https://github.com/4IceG/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
+          git clone --depth 1 https://github.com/4IceG/luci-app-modemband.git package/luci-app-modemband || true
 
-      - name: Dump Port Reference (struktur target msm89xx di fork)
-        if: always()
-        run: |
-          cd openwrt
-          OUT="$GITHUB_WORKSPACE/port-info.txt"
-          T=target/linux/msm89xx
-          {
-            echo "== Fork =="; git log -1 --format='%H %cd %s'
-            echo; echo "== Kernel =="; grep -nE 'KERNEL_PATCHVER|KERNEL_TESTING_PATCHVER' $T/Makefile || true
-            echo; echo "== Struktur $T =="; find $T -maxdepth 2 | sort | head -n 100 || true
-            echo; echo "== $T/Makefile =="; cat $T/Makefile 2>/dev/null || true
-            echo; echo "== image/Makefile =="; sed -n '1,120p' $T/image/Makefile 2>/dev/null || true
-            echo; echo "== image/msm8916.mk (awal) =="; sed -n '1,100p' $T/image/msm8916.mk 2>/dev/null || true
-            echo; echo "== Sebutan vince =="; grep -rIl vince target package 2>/dev/null | head -n 20 || true
-          } > "$OUT" 2>&1
-          { echo '### Port reference'; echo '```'; cat "$OUT"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Inject Files (LED, Battery, Sysctl, First-Boot Setup, TTL)
+      - name: Inject Custom Files (LED, Battery Bypass, Sysctl, First-Boot Setup, TTL 64)
         run: |
           cd openwrt
           mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
 
+          # 1. LED Status Monitor Daemon
           cat << 'LED_SCRIPT' > files/usr/bin/led-status-monitor.sh
           #!/bin/sh
           LED_DIR="/sys/class/leds/white:status"
@@ -158,6 +121,7 @@ jobs:
           LED_SCRIPT
           chmod +x files/usr/bin/led-status-monitor.sh
 
+          # 2. Service LED
           cat << 'LED_SERVICE' > files/etc/init.d/led-status
           #!/bin/sh /etc/rc.common
           START=99
@@ -171,6 +135,7 @@ jobs:
           LED_SERVICE
           chmod +x files/etc/init.d/led-status
 
+          # 3. Battery Bypass
           cat << 'BATTERY_EOF' > files/etc/init.d/battery-bypass
           #!/bin/sh /etc/rc.common
           START=99
@@ -183,18 +148,19 @@ jobs:
           BATTERY_EOF
           chmod +x files/etc/init.d/battery-bypass
 
+          # 4. Sysctl BBR
           cat << 'SYSCTL_EOF' > files/etc/sysctl.d/99-network-speed.conf
           net.core.default_qdisc=fq
           net.ipv4.tcp_congestion_control=bbr
           net.ipv4.tcp_fastopen=3
           SYSCTL_EOF
 
+          # 5. uci-defaults First-Boot Config
           cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
           printf '%s\n%s\n' '__ROOT_PASS__' '__ROOT_PASS__' | passwd root >/dev/null 2>&1
           uci set network.lan.ipaddr='192.168.1.1'
           uci set network.lan.netmask='255.255.255.0'
-          # USB gadget (usb0) ikut bridge LAN: jalur masuk lewat kabel USB
           if [ "$(uci -q get network.@device[0].name)" = "br-lan" ]; then
               uci -q del_list network.@device[0].ports='usb0'
               uci add_list network.@device[0].ports='usb0'
@@ -238,6 +204,7 @@ jobs:
           sed -i "s#__ROOT_PASS__#${ROOT_PASS}#g; s#__WIFI_SSID__#${WIFI_SSID}#g; s#__WIFI_KEY__#${WIFI_KEY}#g" files/etc/uci-defaults/99-vince-custom
           chmod +x files/etc/uci-defaults/99-vince-custom
 
+          # 6. TTL 64
           cat << 'NFT_EOF' > files/etc/nftables.d/10-ttl-bypass.nft
           chain mangle_postrouting_ttl64 {
               type filter hook postrouting priority 300; policy accept;
@@ -246,48 +213,20 @@ jobs:
           }
           NFT_EOF
 
-      - name: Apply Overlay
-        run: |
-          if [ -d "$GITHUB_WORKSPACE/overlay" ]; then
-            cp -a "$GITHUB_WORKSPACE/overlay/." openwrt/
-            rm -f openwrt/README.md
-          fi
-
-      - name: Auto Scaffold Subtarget msm8953 + Device Vince
-        continue-on-error: true
-        run: bash ci/scaffold-msm8953.sh openwrt
-
-      - name: Show Scaffold Result
-        if: always()
+      - name: Inject Native Configuration Target MSM89xx
         run: |
           cd openwrt
-          {
-            echo '### Hasil scaffold'
-            echo '```'
-            git status --short | head -n 40 || true
-            echo; echo "--- image/msm8953.mk ---"; sed -n '1,200p' target/linux/msm89xx/image/msm8953.mk 2>/dev/null || true
-            echo; echo "--- msm8953/target.mk ---"; cat target/linux/msm89xx/msm8953/target.mk 2>/dev/null || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Inject Configuration & Lock Target MSM89xx
-        run: |
-          cd openwrt
-          mkdir -p "$GITHUB_WORKSPACE/ci-logs"
 
           cat << 'CONFIG_EOF' > .config
           CONFIG_TARGET_msm89xx=y
-          CONFIG_TARGET_msm89xx_msm8953=y
-          CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
+          CONFIG_TARGET_ALL_PROFILES=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
-          CONFIG_AUTOREMOVE=y
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-compat=y
           CONFIG_PACKAGE_dropbear=y
           CONFIG_PACKAGE_kmod-wcn36xx=y
-          CONFIG_PACKAGE_kmod-usb-gadget-eth=y
-          CONFIG_PACKAGE_kmod-usb-gadget-serial=y
+          CONFIG_PACKAGE_hostapd=y
           CONFIG_PACKAGE_kmod-tcp-bbr=y
           CONFIG_PACKAGE_sqm-scripts=y
           CONFIG_PACKAGE_luci-app-sqm=y
@@ -299,7 +238,6 @@ jobs:
           CONFIG_PACKAGE_qmi-utils=y
           CONFIG_PACKAGE_mbim-utils=y
           CONFIG_PACKAGE_sms-tool=y
-          CONFIG_PACKAGE_modemband=y
           CONFIG_PACKAGE_luci-app-modemband=y
           CONFIG_PACKAGE_luci-app-sms-tool-js=y
           CONFIG_PACKAGE_usb-modeswitch=y
@@ -329,85 +267,27 @@ jobs:
           CONFIG_PACKAGE_luci-app-ttyd=y
           CONFIG_EOF
 
-          cp .config my.config
           make defconfig
 
-          # Paket wajib: tidak boleh dimatikan oleh loop auto-fix
-          cat << 'PROTECT_EOF' > "$GITHUB_WORKSPACE/ci-logs/protected.txt"
-          luci
-          luci-compat
-          dropbear
-          kmod-wcn36xx
-          kmod-usb-gadget-eth
-          kmod-usb-gadget-serial
-          modemmanager
-          luci-proto-modemmanager
-          block-mount
-          PROTECT_EOF
-
-          # Simbol yang dibuang defconfig (paket tidak ada / nama salah / feed belum di-install)
-          grep -E '^CONFIG_' my.config | while read -r line; do
-            grep -qxF "$line" .config || echo "::warning::Hilang setelah defconfig: $line"
-          done
-          echo "wpad terpilih:"; grep -E '^CONFIG_PACKAGE_wpad' .config || echo "(tidak ada wpad terpilih!)"
-
-      - name: Verify Target Safety Guard
+      - name: Download Sources
         run: |
           cd openwrt
-          fail=0
-          grep -q '^CONFIG_TARGET_msm89xx=y' .config || { echo "::error::Target msm89xx tidak terpilih"; fail=1; }
-          grep -q '^CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y' .config || { echo "::error::Device xiaomi_vince tidak terpilih"; fail=1; }
-          if [ "$fail" = 1 ]; then
-            {
-              echo '### Guard gagal: port Vince belum terbentuk di source'
-              echo '```'
-              echo "Isi target/linux/msm89xx:"; ls target/linux/msm89xx || true
-              echo; echo "CONFIG_TARGET terpilih:"; grep '^CONFIG_TARGET_' .config | head -n 10 || true
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Scaffold gagal membentuk target. Build dihentikan supaya tidak menghasilkan image device lain."
-            exit 1
-          fi
-          echo "::notice::Target terverifikasi: msm89xx / msm8953 / xiaomi_vince"
-
-      - name: Upload Port Info
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: port-info
-          path: port-info.txt
-          if-no-files-found: ignore
-
-      - name: Download Sources (Bypass HTTP 403)
-        run: |
-          cd openwrt
+          sed -i 's/wget -t/wget --user-agent="Mozilla\/5.0" -t/g' scripts/download.pl 2>/dev/null || true
           make download -j8 WGET="wget --user-agent='Mozilla/5.0'" V=s || make download -j1 WGET="wget --user-agent='Mozilla/5.0'" V=s || true
 
-      - name: Build Loop (auto retry + auto fix)
-        run: bash ci/build-loop.sh openwrt
+      - name: Compile Firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) V=s || make -j1 V=s
 
-      - name: Package Flash Files
-        run: bash ci/package-flash.sh openwrt
+      - name: Collect & Package Images
+        run: |
+          cd openwrt
+          mkdir -p $GITHUB_WORKSPACE/flash-out
+          find bin/targets/ -type f \( -name "*.img" -o -name "*.bin" -o -name "*.gz" \) -exec cp -v {} $GITHUB_WORKSPACE/flash-out/ \;
 
-      - name: Upload Flash Package
+      - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vince-flash-package
+          name: openwrt-vince-firmware
           path: flash-out/
-
-      - name: Save Download & ccache Cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            openwrt/dl
-            openwrt/.ccache
-          key: openwrt-vince-${{ github.run_id }}
-
-      - name: Upload CI Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-logs
-          path: ci-logs/
-          if-no-files-found: ignore
