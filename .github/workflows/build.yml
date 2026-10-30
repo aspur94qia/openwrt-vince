@@ -26,7 +26,7 @@ jobs:
           apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
           libelf-dev libdw-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev python3-pyelftools libpython3-dev rsync subversion swig time u-boot-tools \
-          device-tree-compiler unzip wget curl zstd flex bison ca-certificates xsltproc zlib1g-dev
+          device-tree-compiler unzip wget curl zstd flex bison ca-certificates xsltproc zlib1g-dev libffi-dev
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -63,15 +63,17 @@ jobs:
               f.write(hook)
           "
 
-      - name: Update Feeds & Clone Custom LuCI Apps
+      - name: Update Feeds & Install All Dependencies & Custom LuCI Apps
         run: |
           cd openwrt
           ./scripts/feeds update -a
-          ./scripts/feeds install luci luci-compat luci-proto-modemmanager luci-proto-relay luci-proto-wireguard
-          ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch
-          ./scripts/feeds install sqm-scripts luci-app-sqm luci-app-travelmate relayd mwan3 luci-app-mwan3
-          ./scripts/feeds install wireguard-tools zerotier luci-app-zerotier zram-swap aria2 luci-app-aria2
-          ./scripts/feeds install luci-app-statistics luci-app-ttyd
+          
+          # Install dependensi dasar dan pustaka sistem secara lengkap untuk mencegah missing libffi/glib2
+          ./scripts/feeds install libffi zlib libopenssl libubox ubus uci json-c blobmsg-json
+          
+          # Install seluruh paket router, network, protocol, dan LuCI dasar
+          ./scripts/feeds install -a -p packages
+          ./scripts/feeds install -a -p luci
 
           # Clone LuCI kustom 4IceG langsung ke folder package agar terbaca defconfig
           git clone --depth 1 https://github.com/4IceG/luci-app-sms-tool-js.git package/luci-app-sms-tool-js || true
@@ -265,6 +267,9 @@ jobs:
           CONFIG_PACKAGE_luci-app-aria2=y
           CONFIG_PACKAGE_luci-app-statistics=y
           CONFIG_PACKAGE_luci-app-ttyd=y
+          CONFIG_PACKAGE_libffi=y
+          CONFIG_PACKAGE_glib2=y
+          CONFIG_PACKAGE_glib2-gobject=y
           CONFIG_EOF
 
           make defconfig
