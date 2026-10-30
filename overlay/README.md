@@ -7,5 +7,3 @@ Kalau scaffold otomatis kurang tepat, taruh file yang benar di sini (menimpa has
 - overlay/target/linux/msm89xx/msm8953/config-default
 - overlay/target/linux/msm89xx/image/msm8953.mk
 - overlay/files/lib/firmware/...   (blob WiFi dari stock, pakai repo PRIVATE)
-
-Patch tambahan: overlay-patches/*.patch (di-apply dengan git apply).

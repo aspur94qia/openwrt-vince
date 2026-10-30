@@ -1,5 +1,7 @@
 #!/bin/bash
 # Membuat subtarget msm8953 + device xiaomi_vince dengan menyalin subtarget acuan (best effort).
+# DTS TIDAK dibuat di sini: kernel mainline sudah punya msm8953-xiaomi-vince.dts.
+# Kalau DTS tidak ada, build harus GAGAL jelas (bukan diganti DTS palsu).
 cd "${1:-openwrt}" || exit 1
 T=target/linux/msm89xx
 [ -d "$T" ] || { echo "::error::$T tidak ada di fork ini"; exit 1; }
@@ -68,19 +70,7 @@ CONFIG_SERIAL_MSM_CONSOLE=y
 CONFIG_POWER_RESET_MSM=y
 KCFG
 
-# 4. Fallback DTS agar kernel compile tidak gagal (dtbs missing)
-DTS_DIR="$T/files/arch/arm64/boot/dts/qcom"
-mkdir -p "$DTS_DIR"
-if [ ! -f "$DTS_DIR/msm8953-xiaomi-vince.dts" ]; then
-  REF_DTS=$(find "$DTS_DIR" -name "*.dts" 2>/dev/null | head -n 1)
-  if [ -n "$REF_DTS" ]; then
-    cp "$REF_DTS" "$DTS_DIR/msm8953-xiaomi-vince.dts"
-  else
-    echo '/dts-v1/; / { model = "Xiaomi Redmi 5 Plus"; compatible = "xiaomi,vince", "qcom,msm8953"; };' > "$DTS_DIR/msm8953-xiaomi-vince.dts"
-  fi
-fi
-
-# 5. Definisi image + device xiaomi_vince
+# 4. Definisi image + device xiaomi_vince
 python3 - << 'PY'
 import os, re, sys
 ref = os.environ['REF']

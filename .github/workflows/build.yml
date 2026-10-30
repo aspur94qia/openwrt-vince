@@ -4,12 +4,6 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      profile:
-        description: "minimal = bring-up, full = semua paket"
-        type: choice
-        options: [ full, minimal ]
-        default: full
 
 permissions:
   contents: write
@@ -18,7 +12,6 @@ env:
   FORCE_UNSAFE_CONFIGURE: 1
   FORK_URL: https://github.com/lkiuyu/immortalwrt
   FORK_BRANCH: master
-  PROFILE: ${{ github.event.inputs.profile || 'full' }}
   MAX_ATTEMPTS: 8
   BUILD_BUDGET_MIN: 320
   WIFI_SSID: OpenWrt-Vince
@@ -52,9 +45,20 @@ jobs:
           rm -rf openwrt
           git clone --depth 1 -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
+      - name: Restore Download & ccache Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/.ccache
+          key: openwrt-vince-${{ github.run_id }}
+          restore-keys: |
+            openwrt-vince-
+
       - name: Inject Triple-Hook Fix for Elfutils Obstack Error
         run: |
           cd openwrt
+          [ -f tools/elfutils/Makefile ] || { echo "tools/elfutils tidak ada, lewati"; exit 0; }
           python3 -c "
           hook = '''
           define Host/Configure/Pre/FixObstack
@@ -82,15 +86,34 @@ jobs:
         run: |
           cd openwrt
           ./scripts/feeds update -a
-          ./scripts/feeds install luci luci-compat modemmanager qmi-utils mbim-utils sms-tool usb-modeswitch
+          ./scripts/feeds install luci luci-compat luci-proto-modemmanager luci-proto-relay luci-proto-wireguard
+          ./scripts/feeds install modemmanager qmi-utils mbim-utils sms-tool modemband usb-modeswitch
           ./scripts/feeds install sqm-scripts luci-app-sqm luci-app-travelmate relayd mwan3 luci-app-mwan3
-          ./scripts/feeds install wireguard-tools zerotier zram-swap aria2 luci-app-statistics luci-app-ttyd
+          ./scripts/feeds install wireguard-tools zerotier luci-app-zerotier zram-swap aria2 luci-app-aria2
+          ./scripts/feeds install luci-app-statistics luci-app-ttyd
 
           for repo in luci-app-sms-tool-js luci-app-modemband; do
             if [ -z "$(find feeds -maxdepth 4 -type d -name "$repo" -print -quit)" ]; then
               git clone --depth 1 "https://github.com/4IceG/$repo.git" "package/$repo" || true
             fi
           done
+
+      - name: Dump Port Reference (struktur target msm89xx di fork)
+        if: always()
+        run: |
+          cd openwrt
+          OUT="$GITHUB_WORKSPACE/port-info.txt"
+          T=target/linux/msm89xx
+          {
+            echo "== Fork =="; git log -1 --format='%H %cd %s'
+            echo; echo "== Kernel =="; grep -nE 'KERNEL_PATCHVER|KERNEL_TESTING_PATCHVER' $T/Makefile || true
+            echo; echo "== Struktur $T =="; find $T -maxdepth 2 | sort | head -n 100 || true
+            echo; echo "== $T/Makefile =="; cat $T/Makefile 2>/dev/null || true
+            echo; echo "== image/Makefile =="; sed -n '1,120p' $T/image/Makefile 2>/dev/null || true
+            echo; echo "== image/msm8916.mk (awal) =="; sed -n '1,100p' $T/image/msm8916.mk 2>/dev/null || true
+            echo; echo "== Sebutan vince =="; grep -rIl vince target package 2>/dev/null | head -n 20 || true
+          } > "$OUT" 2>&1
+          { echo '### Port reference'; echo '```'; cat "$OUT"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Inject Files (LED, Battery, Sysctl, First-Boot Setup, TTL)
         run: |
@@ -171,6 +194,11 @@ jobs:
           printf '%s\n%s\n' '__ROOT_PASS__' '__ROOT_PASS__' | passwd root >/dev/null 2>&1
           uci set network.lan.ipaddr='192.168.1.1'
           uci set network.lan.netmask='255.255.255.0'
+          # USB gadget (usb0) ikut bridge LAN: jalur masuk lewat kabel USB
+          if [ "$(uci -q get network.@device[0].name)" = "br-lan" ]; then
+              uci -q del_list network.@device[0].ports='usb0'
+              uci add_list network.@device[0].ports='usb0'
+          fi
           uci commit network
 
           wifi config
@@ -226,7 +254,21 @@ jobs:
           fi
 
       - name: Auto Scaffold Subtarget msm8953 + Device Vince
+        continue-on-error: true
         run: bash ci/scaffold-msm8953.sh openwrt
+
+      - name: Show Scaffold Result
+        if: always()
+        run: |
+          cd openwrt
+          {
+            echo '### Hasil scaffold'
+            echo '```'
+            git status --short | head -n 40 || true
+            echo; echo "--- image/msm8953.mk ---"; sed -n '1,200p' target/linux/msm89xx/image/msm8953.mk 2>/dev/null || true
+            echo; echo "--- msm8953/target.mk ---"; cat target/linux/msm89xx/msm8953/target.mk 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Inject Configuration & Lock Target MSM89xx
         run: |
@@ -239,21 +281,25 @@ jobs:
           CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
+          CONFIG_AUTOREMOVE=y
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-compat=y
           CONFIG_PACKAGE_dropbear=y
           CONFIG_PACKAGE_kmod-wcn36xx=y
-          CONFIG_PACKAGE_hostapd=y
+          CONFIG_PACKAGE_kmod-usb-gadget-eth=y
+          CONFIG_PACKAGE_kmod-usb-gadget-serial=y
           CONFIG_PACKAGE_kmod-tcp-bbr=y
           CONFIG_PACKAGE_sqm-scripts=y
           CONFIG_PACKAGE_luci-app-sqm=y
           CONFIG_PACKAGE_luci-app-travelmate=y
           CONFIG_PACKAGE_relayd=y
+          CONFIG_PACKAGE_luci-proto-relay=y
           CONFIG_PACKAGE_modemmanager=y
           CONFIG_PACKAGE_luci-proto-modemmanager=y
           CONFIG_PACKAGE_qmi-utils=y
           CONFIG_PACKAGE_mbim-utils=y
           CONFIG_PACKAGE_sms-tool=y
+          CONFIG_PACKAGE_modemband=y
           CONFIG_PACKAGE_luci-app-modemband=y
           CONFIG_PACKAGE_luci-app-sms-tool-js=y
           CONFIG_PACKAGE_usb-modeswitch=y
@@ -273,6 +319,7 @@ jobs:
           CONFIG_PACKAGE_luci-app-mwan3=y
           CONFIG_PACKAGE_wireguard-tools=y
           CONFIG_PACKAGE_kmod-wireguard=y
+          CONFIG_PACKAGE_luci-proto-wireguard=y
           CONFIG_PACKAGE_zerotier=y
           CONFIG_PACKAGE_luci-app-zerotier=y
           CONFIG_PACKAGE_zram-swap=y
@@ -282,12 +329,58 @@ jobs:
           CONFIG_PACKAGE_luci-app-ttyd=y
           CONFIG_EOF
 
+          cp .config my.config
           make defconfig
+
+          # Paket wajib: tidak boleh dimatikan oleh loop auto-fix
+          cat << 'PROTECT_EOF' > "$GITHUB_WORKSPACE/ci-logs/protected.txt"
+          luci
+          luci-compat
+          dropbear
+          kmod-wcn36xx
+          kmod-usb-gadget-eth
+          kmod-usb-gadget-serial
+          modemmanager
+          luci-proto-modemmanager
+          block-mount
+          PROTECT_EOF
+
+          # Simbol yang dibuang defconfig (paket tidak ada / nama salah / feed belum di-install)
+          grep -E '^CONFIG_' my.config | while read -r line; do
+            grep -qxF "$line" .config || echo "::warning::Hilang setelah defconfig: $line"
+          done
+          echo "wpad terpilih:"; grep -E '^CONFIG_PACKAGE_wpad' .config || echo "(tidak ada wpad terpilih!)"
+
+      - name: Verify Target Safety Guard
+        run: |
+          cd openwrt
+          fail=0
+          grep -q '^CONFIG_TARGET_msm89xx=y' .config || { echo "::error::Target msm89xx tidak terpilih"; fail=1; }
+          grep -q '^CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y' .config || { echo "::error::Device xiaomi_vince tidak terpilih"; fail=1; }
+          if [ "$fail" = 1 ]; then
+            {
+              echo '### Guard gagal: port Vince belum terbentuk di source'
+              echo '```'
+              echo "Isi target/linux/msm89xx:"; ls target/linux/msm89xx || true
+              echo; echo "CONFIG_TARGET terpilih:"; grep '^CONFIG_TARGET_' .config | head -n 10 || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Scaffold gagal membentuk target. Build dihentikan supaya tidak menghasilkan image device lain."
+            exit 1
+          fi
+          echo "::notice::Target terverifikasi: msm89xx / msm8953 / xiaomi_vince"
+
+      - name: Upload Port Info
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: port-info
+          path: port-info.txt
+          if-no-files-found: ignore
 
       - name: Download Sources (Bypass HTTP 403)
         run: |
           cd openwrt
-          sed -i 's/wget -t/wget --user-agent="Mozilla\/5.0" -t/g' scripts/download.pl 2>/dev/null || true
           make download -j8 WGET="wget --user-agent='Mozilla/5.0'" V=s || make download -j1 WGET="wget --user-agent='Mozilla/5.0'" V=s || true
 
       - name: Build Loop (auto retry + auto fix)
@@ -301,6 +394,15 @@ jobs:
         with:
           name: vince-flash-package
           path: flash-out/
+
+      - name: Save Download & ccache Cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/.ccache
+          key: openwrt-vince-${{ github.run_id }}
 
       - name: Upload CI Logs
         if: always()

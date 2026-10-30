@@ -66,11 +66,12 @@ while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
   fixed=0
 
   if grep -qE 'No space left on device' "$LOG"; then
-    echo "::error::Disk penuh. Gunakan profile=minimal atau hapus paket besar."
+    echo "::error::Disk penuh. Kurangi paket di config."
     df -h . | tee -a "$SUMMARY"
     break
   fi
-  if grep -qE 'Download failed|Hash check failed|Connection (timed out|reset)|Failed to download|403' "$LOG"; then
+  # Pola 403 dipersempit (angka 403 polos cocok dengan hash/ukuran file di log)
+  if grep -qE 'Download failed|Hash check failed|Connection (timed out|reset)|Failed to download|HTTP/[0-9.]+ 403|403 Forbidden|error 403' "$LOG"; then
     echo "[fix] ulangi download"; fix_download; fixed=1
   fi
   if grep -q 'obstack' "$LOG" && fix_obstack; then
