@@ -1,4 +1,5 @@
 #!/bin/bash
+# Membuat subtarget msm8953 + device xiaomi_vince dengan menyalin subtarget acuan (best effort).
 cd "${1:-openwrt}" || exit 1
 T=target/linux/msm89xx
 [ -d "$T" ] || { echo "::error::$T tidak ada di fork ini"; exit 1; }
@@ -14,12 +15,19 @@ for c in msm8916 msm8909 msm8939; do
 done
 [ -n "$REF" ] || { echo "::error::Tidak ada subtarget acuan di $T"; ls "$T"; exit 1; }
 REFU=$(echo "$REF" | tr 'a-z' 'A-Z')
+echo "Subtarget acuan: $REF"
 export REF
 
+# 1. Daftarkan subtarget di Makefile target
 if ! grep -qE '^SUBTARGETS[[:space:]]*:?=.*msm8953' "$T/Makefile"; then
-  sed -i -E 's/^(SUBTARGETS[[:space:]]*:?=.*)$/\1 msm8953/' "$T/Makefile" 2>/dev/null || true
+  if grep -qE '^SUBTARGETS.*\\$' "$T/Makefile"; then
+    echo "::warning::SUBTARGETS multi-baris, tambahkan msm8953 manual lewat overlay"
+  else
+    sed -i -E 's/^(SUBTARGETS[[:space:]]*:?=.*)$/\1 msm8953/' "$T/Makefile"
+  fi
 fi
 
+# 2. Salin subtarget acuan
 if [ ! -d "$T/msm8953" ]; then
   cp -a "$T/$REF" "$T/msm8953"
   grep -rIl -e "$REF" -e "$REFU" "$T/msm8953" 2>/dev/null | xargs -r sed -i "s/$REF/msm8953/g; s/$REFU/MSM8953/g"
@@ -28,6 +36,7 @@ if [ ! -d "$T/msm8953" ]; then
   done
 fi
 
+# 3. Config kernel tambahan MSM8953
 touch "$T/msm8953/config-default"
 cat >> "$T/msm8953/config-default" << 'KCFG'
 CONFIG_ARCH_QCOM=y
@@ -59,8 +68,8 @@ CONFIG_SERIAL_MSM_CONSOLE=y
 CONFIG_POWER_RESET_MSM=y
 KCFG
 
-# Buat Fallback Dummy DTS jika belum ada agar kernel compile tidak Error 2
-DTS_DIR="target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
+# 4. Fallback DTS agar kernel compile tidak gagal (dtbs missing)
+DTS_DIR="$T/files/arch/arm64/boot/dts/qcom"
 mkdir -p "$DTS_DIR"
 if [ ! -f "$DTS_DIR/msm8953-xiaomi-vince.dts" ]; then
   REF_DTS=$(find "$DTS_DIR" -name "*.dts" 2>/dev/null | head -n 1)
@@ -71,24 +80,25 @@ if [ ! -f "$DTS_DIR/msm8953-xiaomi-vince.dts" ]; then
   fi
 fi
 
+# 5. Definisi image + device xiaomi_vince
 python3 - << 'PY'
 import os, re, sys
 ref = os.environ['REF']
 src = f'target/linux/msm89xx/image/{ref}.mk'
 dst = 'target/linux/msm89xx/image/msm8953.mk'
 if os.path.exists(dst) and 'xiaomi_vince' in open(dst).read():
-    sys.exit(0)
+    print('image/msm8953.mk sudah berisi xiaomi_vince'); sys.exit(0)
 if not os.path.exists(src):
-    sys.exit(0)
+    print(f'::error::{src} tidak ada'); sys.exit(2)
 s = open(src).read().replace(ref, 'msm8953').replace(ref.upper(), 'MSM8953')
 names = re.findall(r'^TARGET_DEVICES[ \t]*\+=[ \t]*(\S+)[ \t]*$', s, re.M)
 if not names:
-    sys.exit(0)
+    print('::error::Tidak ada TARGET_DEVICES di mk acuan'); sys.exit(3)
 def blk(n):
     return re.compile(r'^define Device/' + re.escape(n) + r'[ \t]*\n.*?^endef[ \t]*\n?', re.M | re.S)
 m = blk(names[0]).search(s)
 if not m:
-    sys.exit(0)
+    print('::error::Blok device acuan tidak ditemukan'); sys.exit(4)
 block = m.group(0)
 for n in names:
     s = blk(n).sub('', s)
@@ -103,6 +113,9 @@ else:
     new = re.sub(r'^endef', '  DEVICE_DTS := qcom/msm8953-xiaomi-vince\nendef', new, count=1, flags=re.M)
 out = s.rstrip() + '\n\n' + new.rstrip() + '\nTARGET_DEVICES += xiaomi_vince\n'
 open(dst, 'w').write(out)
+print('Dibuat', dst, 'dari device acuan', names[0])
 PY
+rc=$?
+[ $rc -eq 0 ] || exit $rc
 
 echo "Scaffold selesai."

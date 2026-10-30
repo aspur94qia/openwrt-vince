@@ -4,6 +4,12 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "minimal = bring-up, full = semua paket"
+        type: choice
+        options: [ full, minimal ]
+        default: full
 
 permissions:
   contents: write
@@ -12,31 +18,33 @@ env:
   FORCE_UNSAFE_CONFIGURE: 1
   FORK_URL: https://github.com/lkiuyu/immortalwrt
   FORK_BRANCH: master
+  PROFILE: ${{ github.event.inputs.profile || 'full' }}
   MAX_ATTEMPTS: 8
   BUILD_BUDGET_MIN: 320
   WIFI_SSID: OpenWrt-Vince
   WIFI_KEY: ${{ secrets.WIFI_KEY || 'vince12345' }}
   ROOT_PASS: ${{ secrets.ROOT_PASS || 'vince12345' }}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 355
+    container:
+      image: ubuntu:22.04
     steps:
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost 2>/dev/null || true
-          sudo apt-get clean
-
       - name: Install Complete Build Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
+          apt-get update
+          apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
           libelf-dev libdw-dev libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev python3-pyelftools libpython3-dev rsync subversion swig time u-boot-tools \
           device-tree-compiler unzip wget curl zstd flex bison ca-certificates xsltproc zlib1g-dev
 
-      - name: Checkout Repository
+      - name: Checkout Repository (overlay + ci)
         uses: actions/checkout@v4
 
       - name: Clone OpenWrt Fork
@@ -70,7 +78,7 @@ jobs:
               f.write(hook)
           "
 
-      - name: Update Feeds & Install Selected Packages
+      - name: Update Feeds & Install Selected Packages ONLY
         run: |
           cd openwrt
           ./scripts/feeds update -a
@@ -84,7 +92,7 @@ jobs:
             fi
           done
 
-      - name: Inject Files (LED, Battery, Sysctl, UCI Defaults, TTL)
+      - name: Inject Files (LED, Battery, Sysctl, First-Boot Setup, TTL)
         run: |
           cd openwrt
           mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
@@ -210,6 +218,13 @@ jobs:
           }
           NFT_EOF
 
+      - name: Apply Overlay
+        run: |
+          if [ -d "$GITHUB_WORKSPACE/overlay" ]; then
+            cp -a "$GITHUB_WORKSPACE/overlay/." openwrt/
+            rm -f openwrt/README.md
+          fi
+
       - name: Auto Scaffold Subtarget msm8953 + Device Vince
         run: bash ci/scaffold-msm8953.sh openwrt
 
@@ -220,6 +235,8 @@ jobs:
 
           cat << 'CONFIG_EOF' > .config
           CONFIG_TARGET_msm89xx=y
+          CONFIG_TARGET_msm89xx_msm8953=y
+          CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
           CONFIG_PACKAGE_luci=y
@@ -267,9 +284,10 @@ jobs:
 
           make defconfig
 
-      - name: Download Sources
+      - name: Download Sources (Bypass HTTP 403)
         run: |
           cd openwrt
+          sed -i 's/wget -t/wget --user-agent="Mozilla\/5.0" -t/g' scripts/download.pl 2>/dev/null || true
           make download -j8 WGET="wget --user-agent='Mozilla/5.0'" V=s || make download -j1 WGET="wget --user-agent='Mozilla/5.0'" V=s || true
 
       - name: Build Loop (auto retry + auto fix)
