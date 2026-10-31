@@ -115,8 +115,14 @@ jobs:
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      - name: Uji Pra-Build & Test Kompilasi Kernel
+      - name: Pengecekan Pra-Build (Pre-flight Check)
         run: bash ci/inspect-preflight.sh openwrt
+
+      - name: Build Host Tools & Toolchain (Cross-Compiler Setup)
+        run: |
+          cd openwrt
+          make tools/install -j"$(nproc)"
+          make toolchain/install -j"$(nproc)"
 
       - name: Build Firmware (Single Pass 1x Jalan)
         run: bash ci/build.sh openwrt

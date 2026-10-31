@@ -14,7 +14,7 @@ if [ "$rc" -ne 0 ]; then
   {
     echo "### Build Firmware Gagal (Exit Code $rc)"
     echo '```text'
-    grep -nE 'error:|Error [0-9]+|\*\*\* |ERROR:' "$LOG" | tail -n 40 | cut -c1-300
+    grep -nE 'error:|Error [0-9]+|\*\*\* |ERROR:' "$LOG" | tail -n 50 | cut -c1-300
     echo '```'
   } >> "$SUMMARY"
 fi
