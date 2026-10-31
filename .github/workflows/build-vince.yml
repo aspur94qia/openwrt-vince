@@ -1,0 +1,104 @@
+name: Build OpenWrt Vince (v21 High-Speed)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
+          autoconf automake libtool gperf help2man intltool patch pkgconf bzip2 xz-utils \
+          libelf-dev libdw-dev libncurses-dev libssl-dev libglib2.0-dev libgmp3-dev libmpc-dev \
+          libmpfr-dev libreadline-dev libltdl-dev python3 python3-setuptools \
+          python3-dev python3-pyelftools python3-ply python3-docutils libpython3-dev re2c squashfs-tools \
+          texinfo xmlto cmake ninja-build rsync subversion swig time u-boot-tools device-tree-compiler \
+          unzip wget curl zstd flex bison ca-certificates xsltproc zlib1g-dev xxd p7zip-full
+
+      - name: Cache Ccache & Downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ccache
+            openwrt/dl
+          key: ${{ runner.os }}-openwrt-vince-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-vince-
+
+      - name: Clone OpenWrt Fork & Apply Scaffold
+        run: |
+          rm -rf openwrt
+          git clone --depth 1 --filter=blob:none -b master https://github.com/lkiuyu/immortalwrt openwrt
+          if [ -d "overlay" ]; then
+            cp -a overlay/. openwrt/
+            rm -f openwrt/README.md
+          fi
+          bash ci/scaffold-msm8953.sh openwrt
+
+      - name: Inject Configuration
+        run: |
+          cd openwrt
+          echo "CONFIG_TARGET_msm89xx=y" > .config
+          echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
+          echo "CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
+          echo "CONFIG_DEVEL=y" >> .config
+          echo "CONFIG_CCACHE=y" >> .config
+          echo "CONFIG_PARALLEL_BUILDING=y" >> .config
+          echo "CONFIG_AUTOREMOVE=y" >> .config
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_PACKAGE_luci-compat=y" >> .config
+          echo "CONFIG_PACKAGE_dropbear=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-gadget-eth=y" >> .config
+          echo "CONFIG_PACKAGE_zram-swap=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-ttyd=y" >> .config
+          make defconfig
+
+      - name: Update Feeds & Download Sources
+        run: |
+          cd openwrt
+          ./scripts/feeds update packages luci
+          ./scripts/feeds install -a -p packages
+          ./scripts/feeds install -a -p luci
+          make download -j2 WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
+
+      - name: Fast Tools & Pre-built Toolchain Setup
+        run: |
+          cd openwrt
+          make tools/install -j2 || true
+          make toolchain/install -j2 || true
+
+      - name: Build Firmware Image
+        run: |
+          cd openwrt
+          make -j$(nproc) IGNORE_ERRORS=m || make -j1 V=s
+
+      - name: Package Flash Files
+        run: bash ci/package-flash.sh openwrt
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vince-openwrt-firmware
+          path: flash-out/
