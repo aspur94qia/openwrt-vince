@@ -9,7 +9,13 @@ jobs:
     steps:
       - run:
           name: SPEK CIRCLECI
-          command: lscpu | grep -E "Model name|CPU\(s\):|Thread|Core" && free -h && df -h /
+          command: |
+            echo "=================== CPU INFO ==================="
+            lscpu | grep -E "Model name|CPU\(s\):|Thread|Core"
+            echo -e "\n=================== RAM INFO ==================="
+            free -h
+            echo -e "\n=================== DISK SPACE ==================="
+            df -h /
 workflows:
   version: 2
   check:
