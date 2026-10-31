@@ -5,7 +5,7 @@ LOG="$LOGDIR/build.log"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 JOBS=$(nproc)
-echo "Starting 1-Pass High Speed Build using $JOBS threads..."
+echo "Menjalankan build 1x jalan penuh dengan $JOBS thread..."
 
 make -j"$JOBS" 2>&1 | tee "$LOG" | grep --line-buffered -E '^make\[[0-9]\]: (Entering|\*\*\*)|ERROR:| error:' | cut -c1-200
 rc=${PIPESTATUS[0]}

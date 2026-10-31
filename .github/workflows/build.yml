@@ -55,8 +55,8 @@ jobs:
           rm -rf openwrt
           git clone --depth 1 --filter=blob:none -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
-      # CACHE UTAMA: Menyimpan file unduhan (dl), ccache, dan tools/staging_dir
-      - name: Persistent OpenWrt Cache (DL & Tools)
+      # CACHE DL DAN TOOLCHAIN SUPAYA TIDAK DOWNLOAD/BUILD ULANG
+      - name: Cache OpenWrt DL & Tools
         uses: actions/cache@v4
         with:
           path: |
@@ -161,7 +161,7 @@ jobs:
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      # BUILD HANYA 1X JALAN (Cepat & Efisien)
+      # BUILD HANYA 1X JALAN
       - name: Build Firmware (Single Pass)
         run: bash ci/build.sh openwrt
 
