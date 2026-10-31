@@ -1,20 +1,20 @@
 version: 2.1
 
 executors:
-  openwrt-builder:
+  spec-checker:
     docker:
       - image: cimg/base:2024.01
-    resource_class: large # Menggunakan spesifikasi Large (8 vCPU / 32 GB RAM)
+    resource_class: large # Menggunakan alokasi 8 vCPU & 32 GB RAM
 
 jobs:
   check-spec:
-    executor: openwrt-builder
+    executor: spec-checker
     steps:
       - run:
-          name: Cek Spesifikasi Runner CircleCI
+          name: Print System Specifications
           command: |
             echo "=================== CPU INFO ==================="
-            lscpu | grep -E "Model name|CPU\(s\):|Thread|Core|Socket|MHz" || nproc
+            lscpu | grep -E "Model name|CPU\(s\):|Thread|Core|Socket|MHz"
             
             echo -e "\n=================== RAM INFO ==================="
             free -h
@@ -28,6 +28,6 @@ jobs:
 
 workflows:
   version: 2
-  check-pipeline:
+  check-hardware:
     jobs:
       - check-spec
