@@ -1,7 +1,5 @@
 #!/bin/bash
-# Membuat subtarget msm8953 + device xiaomi_vince dari subtarget acuan (best effort).
-# DTS TIDAK dibuat di sini: kernel mainline sudah punya msm8953-xiaomi-vince.dts.
-# Kalau DTS tidak ada, build harus GAGAL jelas (bukan diganti DTS palsu).
+# Membuat subtarget msm8953 + device xiaomi_vince dari subtarget acuan.
 cd "${1:-openwrt}" || exit 1
 T=target/linux/msm89xx
 [ -d "$T" ] || { echo "::error::$T tidak ada di fork ini"; exit 1; }
@@ -23,7 +21,6 @@ if ! grep -qE '^SUBTARGETS[[:space:]]*:?=.*msm8953' "$T/Makefile"; then
     sed -i -E 's/^(SUBTARGETS[[:space:]]*:?=.*)$/\1 msm8953/' "$T/Makefile"
   fi
 fi
-grep -n '^SUBTARGETS' "$T/Makefile" || echo "::warning::SUBTARGETS tidak ditemukan di $T/Makefile"
 
 # 2. Salin subtarget acuan
 if [ ! -d "$T/msm8953" ]; then
@@ -34,7 +31,7 @@ if [ ! -d "$T/msm8953" ]; then
   done
 fi
 
-# 3. Config kernel tambahan MSM8953 (simbol tak dikenal diabaikan kernel)
+# 3. Config kernel tambahan MSM8953
 if ! grep -q 'CONFIG_PINCTRL_MSM8953' "$T/msm8953/config-default" 2>/dev/null; then
   touch "$T/msm8953/config-default"
   cat >> "$T/msm8953/config-default" << 'KCFG'
@@ -68,7 +65,7 @@ CONFIG_POWER_RESET_MSM=y
 KCFG
 fi
 
-# 4. Definisi device xiaomi_vince (diturunkan dari device pertama yang ditemukan)
+# 4. Definisi device xiaomi_vince
 python3 - << 'PY'
 import glob, os, re, sys
 ref = os.environ['REF']
@@ -77,7 +74,7 @@ own = f'{img}/{ref}.mk'
 dst = f'{img}/msm8953.mk'
 
 def read(p):
-    with open(p) as f:
+    with open(p, encoding='utf-8', errors='ignore') as f:
         return f.read()
 
 def has_dev(p):
@@ -92,7 +89,7 @@ cands = [own] + sorted(glob.glob(f'{img}/*.mk')) + [f'{img}/Makefile']
 src = next((p for p in cands if has_dev(p)), None)
 if not src:
     print('::error::Tidak ada TARGET_DEVICES di image/*.mk maupun image/Makefile'); sys.exit(2)
-print('Sumber device acuan:', src)
+
 own_case = (src == own)
 
 def blk(n):
@@ -102,9 +99,13 @@ s = read(src)
 if own_case:
     s = s.replace(ref, 'msm8953').replace(ref.upper(), 'MSM8953')
 names = re.findall(r'^TARGET_DEVICES[ \t]*\+=[ \t]*(\S+)[ \t]*$', s, re.M)
+if not names:
+    print('::error::Tidak ada device acuan di', src); sys.exit(3)
+
 m = blk(names[0]).search(s)
 if not m:
     print('::error::Blok device acuan tidak ditemukan:', names[0]); sys.exit(4)
+
 new = m.group(0).replace('Device/' + names[0], 'Device/xiaomi_vince')
 new = re.sub(r'^([ \t]*DEVICE_VENDOR[ \t]*:?=).*$', r'\1 Xiaomi', new, flags=re.M)
 new = re.sub(r'^([ \t]*DEVICE_MODEL[ \t]*:?=).*$', r'\1 Redmi 5 Plus', new, flags=re.M)
@@ -119,18 +120,16 @@ if own_case:
     for n in names:
         s = blk(n).sub('', s)
     s = re.sub(r'^TARGET_DEVICES[ \t]*\+=[ \t]*\S+[ \t]*\n?', '', s, flags=re.M)
-    with open(dst, 'w') as f:
+    with open(dst, 'w', encoding='utf-8') as f:
         f.write(s.rstrip() + '\n\n' + entry)
-    print('Dibuat', dst, 'dari device acuan', names[0])
 else:
     tail = re.search(r'^\$\(eval \$\(call BuildImage\)\)[ \t]*$', s, re.M)
     if tail:
         s = s[:tail.start()] + entry + '\n' + s[tail.start():]
     else:
         s = s.rstrip() + '\n\n' + entry
-    with open(src, 'w') as f:
+    with open(src, 'w', encoding='utf-8') as f:
         f.write(s)
-    print('Device ditambahkan ke file bersama', src)
 PY
 rc=$?
 [ $rc -eq 0 ] || exit $rc
