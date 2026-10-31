@@ -1,13 +1,21 @@
 #!/bin/bash
 cd "${1:-openwrt}" || exit 1
 T=target/linux/msm89xx
-[ -d "$T" ] \vert{}\vert{} { echo "::error::[PRE-BUILD GAGAL] Direktori $T tidak ditemukan di fork ini!"; exit 1; }
+if [ ! -d "$T" ]; then
+  echo "::error::[PRE-BUILD GAGAL] Direktori $T tidak ditemukan di fork ini!"
+  exit 1
+fi
 
 REF=""
 for c in msm8916 msm8909 msm8939; do
   if [ -d "$T/$c" ]; then REF=$c; break; fi
 done
-[ -n "$REF" ] || { echo "::error::[PRE-BUILD GAGAL] Tidak ditemukan subtarget acuan di $T!"; exit 1; }
+
+if [ -z "$REF" ]; then
+  echo "::error::[PRE-BUILD GAGAL] Tidak ditemukan subtarget acuan di $T!"
+  exit 1
+fi
+
 REFU=$(echo "$REF" | tr 'a-z' 'A-Z')
 export REF
 
@@ -126,5 +134,5 @@ else:
         f.write(s)
 PY
 rc=$?
-[ $rc -eq 0 ] \vert{}\vert{} exit$rc
+if [ $rc -ne 0 ]; then exit$rc; fi
 echo "Scaffold subtarget & device selesai."

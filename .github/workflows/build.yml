@@ -115,7 +115,6 @@ jobs:
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      # UJI PRA-BUILD REAL (Akan HENTIKAN Workflow di Menit ke-2 jika Kompilasi C Kernel Bermasalah)
       - name: Uji Pra-Build & Test Kompilasi Kernel
         run: bash ci/inspect-preflight.sh openwrt
 
