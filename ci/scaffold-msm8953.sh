@@ -31,7 +31,8 @@ if [ ! -d "$T/msm8953" ]; then
   cp -a "$T/$REF" "$T/msm8953"
   grep -rIl -e "$REF" -e "$REFU" "$T/msm8953" 2>/dev/null | xargs -r sed -i "s/$REF/msm8953/g; s/$REFU/MSM8953/g"
   find "$T/msm8953" -depth -name "*$REF*" | while read -r f; do
-    mv "$f" "$(dirname "$f")/$(basename "$f" \vert{} sed "s/$REF/msm8953/g")"
+    NEW_NAME=$(echo "$(basename "$f")" \vert{} sed "s/$REF/msm8953/g")
+    mv "$f" "$(dirname "$f")/$NEW_NAME"
   done
 fi
 
