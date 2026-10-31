@@ -52,16 +52,19 @@ jobs:
           rm -rf openwrt
           git clone --depth 1 --filter=blob:none -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
-      - name: Cache OpenWrt DL & Tools
+      # DITINGKATKAN: Cache Toolchain & Staging Dir (Akan Instant Skip di Push Kedua)
+      - name: Cache OpenWrt DL, Tools & Staging Toolchain
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/.ccache
             openwrt/staging_dir/host
-          key: openwrt-vince-dl-tools-${{ runner.os }}
+            openwrt/staging_dir/toolchain-aarch64_*
+            openwrt/staging_dir/target-aarch64_*
+          key: openwrt-vince-toolchain-v19-${{ runner.os }}-${{ hashFiles('openwrt/include/toolchain.mk') }}
           restore-keys: |
-            openwrt-vince-dl-tools-
+            openwrt-vince-toolchain-v19-${{ runner.os }}-
 
       - name: Apply Overlay & Scaffold Subtarget Vince
         run: |
@@ -71,6 +74,7 @@ jobs:
           fi
           bash ci/scaffold-msm8953.sh openwrt
 
+      # DITINGKATKAN: Konfigurasi Paralelisasi & Ccache Aktif
       - name: Inject Configuration & Lock Target MSM89xx
         run: |
           cd openwrt
@@ -80,6 +84,8 @@ jobs:
           CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
+          CONFIG_PARALLEL_BUILDING=y
+          CONFIG_TOOLCHAINOPTS=y
           CONFIG_AUTOREMOVE=y
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-compat=y
@@ -139,7 +145,8 @@ jobs:
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      - name: Build Host Tools & Toolchain (Cross-Compiler Setup)
+      # DITINGKATKAN: Kompilasi Paralel Cepat (Jika Cache Ada, Akan Langsung Terpenuhi)
+      - name: Build Host Tools & Toolchain (Fast Setup)
         run: |
           cd openwrt
           make tools/install -j"$(nproc)"
