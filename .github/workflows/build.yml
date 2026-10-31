@@ -12,8 +12,6 @@ env:
   FORCE_UNSAFE_CONFIGURE: 1
   FORK_URL: https://github.com/lkiuyu/immortalwrt
   FORK_BRANCH: master
-  MAX_ATTEMPTS: 8
-  BUILD_BUDGET_MIN: 320
   WIFI_SSID: OpenWrt-Vince
   WIFI_KEY: ${{ secrets.WIFI_KEY || 'vince12345' }}
   ROOT_PASS: ${{ secrets.ROOT_PASS || 'vince12345' }}
@@ -407,19 +405,49 @@ jobs:
           cd openwrt
           make download -j8 WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 WGET="wget --user-agent='Mozilla/5.0'" V=s || true
 
-      - name: Build Loop (auto retry + auto fix)
+      - name: Build Firmware (pass 1)
+        id: build
+        continue-on-error: true
         run: |
           echo "> build" >> "$GITHUB_WORKSPACE/ci-logs/steps.txt"
-          bash ci/build-loop.sh openwrt
+          bash ci/build.sh openwrt 1
+
+      - name: Auto Fix
+        id: fix
+        if: steps.build.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "> autofix" >> "$GITHUB_WORKSPACE/ci-logs/steps.txt"
+          bash ci/auto-fix.sh openwrt "$GITHUB_WORKSPACE/ci-logs/build-1.log"
+
+      - name: Rebuild After Fix (pass 2)
+        id: rebuild
+        if: steps.fix.outcome == 'success'
+        continue-on-error: true
+        run: |
+          echo "> rebuild" >> "$GITHUB_WORKSPACE/ci-logs/steps.txt"
+          bash ci/build.sh openwrt 2
 
       - name: Package Flash Files
+        if: steps.build.outcome == 'success' || steps.rebuild.outcome == 'success'
         run: bash ci/package-flash.sh openwrt
 
       - name: Upload Flash Package
+        if: steps.build.outcome == 'success' || steps.rebuild.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: vince-flash-package
           path: flash-out/
+
+      - name: Mark Build Result
+        if: always() && steps.build.outcome != 'skipped'
+        run: |
+          if [ "${{ steps.build.outcome }}" = "success" ] || [ "${{ steps.rebuild.outcome }}" = "success" ]; then
+            echo "::notice::Build sukses"
+          else
+            echo "::error::Build gagal (lihat Summary: Auto fix / Build pass)"
+            exit 1
+          fi
 
       - name: Save Download & ccache Cache
         if: always()
@@ -441,7 +469,6 @@ jobs:
             echo; echo "Disk:"; df -h "$GITHUB_WORKSPACE" | tail -n 1
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ -s ci-logs/last-error.txt ]; then cat ci-logs/last-error.txt >> "$GITHUB_STEP_SUMMARY"; fi
 
       - name: Upload CI Logs
         if: always()
