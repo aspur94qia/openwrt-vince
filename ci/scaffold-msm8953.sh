@@ -1,16 +1,14 @@
 #!/bin/bash
-# Membuat subtarget msm8953 + device xiaomi_vince dari subtarget acuan.
 cd "${1:-openwrt}" || exit 1
 T=target/linux/msm89xx
-[ -d "$T" ] || { echo "::error::$T tidak ada di fork ini"; exit 1; }
+[ -d "$T" ] || { echo "::error::[PRE-BUILD GAGAL] Direktori $T tidak ditemukan di fork ini!"; exit 1; }
 
 REF=""
 for c in msm8916 msm8909 msm8939; do
   if [ -d "$T/$c" ]; then REF=$c; break; fi
 done
-[ -n "$REF" ] || { echo "::error::Tidak ada subtarget acuan di $T"; ls "$T"; exit 1; }
+[ -n "$REF" ] || { echo "::error::[PRE-BUILD GAGAL] Tidak ditemukan subtarget acuan (msm8916/8909/8939) di $T!"; exit 1; }
 REFU=$(echo "$REF" | tr 'a-z' 'A-Z')
-echo "Subtarget acuan: $REF"
 export REF
 
 # 1. Daftarkan subtarget di Makefile target
@@ -83,12 +81,12 @@ def has_dev(p):
 allfiles = glob.glob(f'{img}/*.mk') + [f'{img}/Makefile']
 for p in allfiles:
     if os.path.isfile(p) and 'xiaomi_vince' in read(p):
-        print('xiaomi_vince sudah ada di', p); sys.exit(0)
+        print('xiaomi_vince sudah terdaftar di', p); sys.exit(0)
 
 cands = [own] + sorted(glob.glob(f'{img}/*.mk')) + [f'{img}/Makefile']
 src = next((p for p in cands if has_dev(p)), None)
 if not src:
-    print('::error::Tidak ada TARGET_DEVICES di image/*.mk maupun image/Makefile'); sys.exit(2)
+    print('::error::Tidak ada TARGET_DEVICES di image/*.mk'); sys.exit(2)
 
 own_case = (src == own)
 
@@ -100,11 +98,11 @@ if own_case:
     s = s.replace(ref, 'msm8953').replace(ref.upper(), 'MSM8953')
 names = re.findall(r'^TARGET_DEVICES[ \t]*\+=[ \t]*(\S+)[ \t]*$', s, re.M)
 if not names:
-    print('::error::Tidak ada device acuan di', src); sys.exit(3)
+    print('::error::Tidak ada device acuan ditemukan'); sys.exit(3)
 
 m = blk(names[0]).search(s)
 if not m:
-    print('::error::Blok device acuan tidak ditemukan:', names[0]); sys.exit(4)
+    print('::error::Blok device acuan tidak ditemukan'); sys.exit(4)
 
 new = m.group(0).replace('Device/' + names[0], 'Device/xiaomi_vince')
 new = re.sub(r'^([ \t]*DEVICE_VENDOR[ \t]*:?=).*$', r'\1 Xiaomi', new, flags=re.M)
@@ -134,4 +132,4 @@ PY
 rc=$?
 [ $rc -eq 0 ] || exit $rc
 
-echo "Scaffold selesai."
+echo "Scaffold subtarget & device selesai."
