@@ -1,0 +1,25 @@
+name: Check Runner Spec
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  spec:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: System Info & Specs
+        run: |
+          echo "=================== CPU INFO ==================="
+          lscpu | grep -E "Model name|CPU\(s\):|Thread|Core|Socket|MHz"
+          
+          echo -e "\n=================== RAM INFO ==================="
+          free -h
+          
+          echo -e "\n=================== DISK SPACE ==================="
+          df -h /
+          
+          echo -e "\n=================== OS & KERNEL ==================="
+          uname -a
+          cat /etc/os-release | grep PRETTY_NAME
