@@ -15,7 +15,7 @@ cat << 'DOC'
    fastboot reboot
 5. Akses Router:
    - Web UI: http://192.168.1.1 (Wi-Fi SSID: OpenWrt-Vince / Pass: vince12345)
-   - SSH: ssh root@192.168.1.1 (Pass: vince12345 atau via USB Gadget `usb0`)
+   - SSH: ssh root@192.168.1.1 (Pass: vince12345)
 DOC
 echo "## File Hasil Build"
 ( cd "$OUT" && ls -lh )

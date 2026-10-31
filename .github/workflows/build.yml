@@ -28,10 +28,10 @@ jobs:
       - name: Free Host Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell
-          echo "Kapasitas Disk Bebas:"
+          echo "Disk Space Available:"
           df -h "$GITHUB_WORKSPACE"
 
-      - name: Install Complete Build Dependencies
+      - name: Install Build Dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -48,25 +48,24 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Init Logs
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/ci-logs"
-          echo "> init" >> "$GITHUB_WORKSPACE/ci-logs/steps.txt"
+        run: mkdir -p "$GITHUB_WORKSPACE/ci-logs"
 
       - name: Clone OpenWrt Fork (Fast Shallow Clone)
         run: |
-          echo "> clone" >> "$GITHUB_WORKSPACE/ci-logs/steps.txt"
           rm -rf openwrt
           git clone --depth 1 --filter=blob:none -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
-      - name: Cache Download & Ccache
+      # CACHE UTAMA: Menyimpan file unduhan (dl), ccache, dan tools/staging_dir
+      - name: Persistent OpenWrt Cache (DL & Tools)
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/.ccache
-          key: openwrt-vince-${{ runner.os }}-${{ hashFiles('openwrt/include/kernel-*') }}
+            openwrt/staging_dir/host
+          key: openwrt-vince-dl-tools-${{ runner.os }}
           restore-keys: |
-            openwrt-vince-${{ runner.os }}-
+            openwrt-vince-dl-tools-
 
       - name: Inject Obstack Fix for Elfutils
         run: |
@@ -85,7 +84,6 @@ jobs:
 
       - name: Update & Install Feeds
         run: |
-          echo "> feeds" >> "$GITHUB_WORKSPACE/ci-logs/steps.txt"
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -98,23 +96,10 @@ jobs:
             fi
           done
 
-      - name: Inject Files (Custom Config & Scripts)
+      - name: Inject Custom Configurations
         run: |
           cd openwrt
-          mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults files/etc/nftables.d files/etc/sysctl.d
-
-          cat << 'LED_SCRIPT' > files/usr/bin/led-status-monitor.sh
-          #!/bin/sh
-          LED_DIR="/sys/class/leds/white:status"
-          [ -d "$LED_DIR" ] || LED_DIR=$(ls -d /sys/class/leds/* 2>/dev/null | grep -viE 'flash|torch|backlight' | head -n 1)
-          LED="$LED_DIR/brightness"
-          [ -f "$LED" ] || exit 0
-          while true; do
-              echo 255 > "$LED" 2>/dev/null; sleep 0.2
-              echo 0 > "$LED" 2>/dev/null; sleep 0.8
-          done
-          LED_SCRIPT
-          chmod +x files/usr/bin/led-status-monitor.sh
+          mkdir -p files/usr/bin files/etc/init.d files/etc/uci-defaults
 
           cat << 'CUSTOM_EOF' > files/etc/uci-defaults/99-vince-custom
           #!/bin/sh
@@ -167,42 +152,25 @@ jobs:
 
           make defconfig
 
-          cat << 'PROTECT_EOF' > "$GITHUB_WORKSPACE/ci-logs/protected.txt"
-          luci
-          dropbear
-          kmod-wcn36xx
-          kmod-usb-gadget-eth
-          modemmanager
-          PROTECT_EOF
+      # PENGECEKAN PRA-BUILD (Gagal di sini jika ada file/config yang salah)
+      - name: Run Pre-flight Inspection
+        run: bash ci/inspect-preflight.sh openwrt
 
-      - name: Download Sources Fast
+      - name: Download Sources (Restored from Cache if Available)
         run: |
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      - name: Build Firmware (Pass 1)
-        id: build
-        continue-on-error: true
-        run: bash ci/build.sh openwrt 1
-
-      - name: Auto Fix On Failure
-        id: fix
-        if: steps.build.outcome == 'failure'
-        continue-on-error: true
-        run: bash ci/auto-fix.sh openwrt "$GITHUB_WORKSPACE/ci-logs/build-1.log"
-
-      - name: Rebuild (Pass 2)
-        id: rebuild
-        if: steps.fix.outcome == 'success'
-        continue-on-error: true
-        run: bash ci/build.sh openwrt 2
+      # BUILD HANYA 1X JALAN (Cepat & Efisien)
+      - name: Build Firmware (Single Pass)
+        run: bash ci/build.sh openwrt
 
       - name: Package Flash Files
-        if: steps.build.outcome == 'success' || steps.rebuild.outcome == 'success'
+        if: success()
         run: bash ci/package-flash.sh openwrt
 
       - name: Upload Flash Package
-        if: steps.build.outcome == 'success' || steps.rebuild.outcome == 'success'
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: vince-flash-package
