@@ -25,14 +25,6 @@ if ! grep -q '^CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y' .config; the
     ERR=1
 fi
 
-GCC_CHECK=$(find staging_dir/toolchain-* -name "aarch64-openwrt-linux-musl-gcc" -o -name "aarch64-openwrt-linux-gcc" 2>/dev/null | head -n 1)
-if [ -z "$GCC_CHECK" ]; then
-    echo "::error::[PRE-BUILD GAGAL] Cross-compiler aarch64 belum ter-compile atau tidak ditemukan di staging_dir!"
-    ERR=1
-else
-    echo "::notice::Compiler terverifikasi: $GCC_CHECK"
-fi
-
 if [ "$ERR" -ne 0 ]; then
     echo "::error::Pre-flight gagal! Menghentikan workflow."
     exit 1

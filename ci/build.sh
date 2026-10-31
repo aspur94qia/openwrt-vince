@@ -6,7 +6,6 @@ LOG="$LOGDIR/build.log"
 touch "$LOG"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-# Menggunakan (nproc + 1) untuk memaksimalkan 4 vCPU AMD EPYC
 JOBS=$(($(nproc) + 1))
 echo "Menjalankan Build Firmware Utama High-Speed dengan $JOBS threads..."
 
