@@ -1,33 +1,16 @@
 version: 2.1
-
 executors:
   spec-checker:
-    docker:
-      - image: cimg/base:2024.01
-    resource_class: large # 8 vCPU & 32 GB RAM
-
+    docker: [{image: "cimg/base:2024.01"}]
+    resource_class: large
 jobs:
   check-spec:
     executor: spec-checker
     steps:
       - run:
-          name: Cek Spesifikasi Hardware CircleCI
-          command: |
-            echo "=================== CPU INFO ==================="
-            lscpu | grep -E "Model name|CPU\(s\):|Thread|Core|Socket|MHz"
-            
-            echo -e "\n=================== RAM INFO ==================="
-            free -h
-            
-            echo -e "\n=================== DISK SPACE ==================="
-            df -h /
-            
-            echo -e "\n=================== OS & KERNEL ==================="
-            uname -a
-            cat /etc/os-release | grep PRETTY_NAME
-
+          name: SPEK CIRCLECI
+          command: lscpu | grep -E "Model name|CPU\(s\):|Thread|Core" && free -h && df -h /
 workflows:
   version: 2
-  only-check-spec:
-    jobs:
-      - check-spec
+  check:
+    jobs: [check-spec]
