@@ -12,9 +12,6 @@ env:
   FORCE_UNSAFE_CONFIGURE: 1
   FORK_URL: https://github.com/lkiuyu/immortalwrt
   FORK_BRANCH: master
-  WIFI_SSID: OpenWrt-Vince
-  WIFI_KEY: ${{ secrets.WIFI_KEY || 'vince12345' }}
-  ROOT_PASS: ${{ secrets.ROOT_PASS || 'vince12345' }}
 
 defaults:
   run:
@@ -110,23 +107,47 @@ jobs:
             fi
           done
 
+      - name: Inject Custom UCI & Secrets Fallback
+        env:
+          WIFI_SSID: OpenWrt-Vince
+          WIFI_KEY: ${{ secrets.WIFI_KEY }}
+          ROOT_PASS: ${{ secrets.ROOT_PASS }}
+        run: |
+          cd openwrt
+          W_KEY="${WIFI_KEY:-vince12345}"
+          R_PASS="${ROOT_PASS:-vince12345}"
+          mkdir -p files/etc/uci-defaults
+          cat << CUSTOM_EOF > files/etc/uci-defaults/99-vince-custom
+          #!/bin/sh
+          printf '%s\n%s\n' '$R_PASS' '$R_PASS' | passwd root >/dev/null 2>&1
+          uci set network.lan.ipaddr='192.168.1.1'
+          uci commit network
+          wifi config
+          for i in \$(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface\$/\1/p'); do
+              uci set wireless.\$i.mode='ap'
+              uci set wireless.\$i.ssid='$WIFI_SSID'
+              uci set wireless.\$i.key='$W_KEY'
+              uci set wireless.\$i.disabled='0'
+          done
+          uci commit wireless
+          exit 0
+          CUSTOM_EOF
+          chmod +x files/etc/uci-defaults/99-vince-custom
+
       - name: Download Sources Fast
         run: |
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      # TAHAP 1: BUILD CROSS-COMPILER DULUAN
       - name: Build Host Tools & Toolchain (Cross-Compiler Setup)
         run: |
           cd openwrt
           make tools/install -j"$(nproc)"
           make toolchain/install -j"$(nproc)"
 
-      # TAHAP 2: PENGECEKAN PRA-BUILD TOTAL (Dilakukan SETELAH Toolchain Jadi, Tepat Sebelum Build ROM)
       - name: Pengecekan Pra-Build Total (Pre-flight Check)
         run: bash ci/inspect-preflight.sh openwrt
 
-      # TAHAP 3: BUILD FIRMWARE ROM UTAMA
       - name: Build Firmware (Single Pass 1x Jalan)
         run: bash ci/build.sh openwrt
 

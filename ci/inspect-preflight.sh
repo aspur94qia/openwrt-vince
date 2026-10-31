@@ -5,19 +5,16 @@ echo "=== PENGECEKAN PRA-BUILD TOTAL (TOOLCHAIN & CONFIG VINCE) ==="
 echo "================================================================="
 ERR=0
 
-# 1. Cek Subtarget msm8953
 if [ ! -d "target/linux/msm89xx/msm8953" ]; then
     echo "::error::[PRE-BUILD GAGAL] Subtarget target/linux/msm89xx/msm8953 TIDAK DITEMUKAN!"
     ERR=1
 fi
 
-# 2. Cek Device xiaomi_vince di Makefile
 if ! grep -rq 'xiaomi_vince' target/linux/msm89xx/image/; then
     echo "::error::[PRE-BUILD GAGAL] Device 'xiaomi_vince' TIDAK TERDAFTAR di target/linux/msm89xx/image/!"
     ERR=1
 fi
 
-# 3. Verifikasi Konfigurasi .config
 if ! grep -q '^CONFIG_TARGET_msm89xx=y' .config; then
     echo "::error::[PRE-BUILD GAGAL] Target msm89xx tidak terpilih di .config!"
     ERR=1
@@ -28,7 +25,6 @@ if ! grep -q '^CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y' .config; the
     ERR=1
 fi
 
-# 4. Verifikasi Ketersediaan Toolchain Compiler GCC (aarch64)
 GCC_CHECK=$(find staging_dir/toolchain-* -name "aarch64-openwrt-linux-musl-gcc" -o -name "aarch64-openwrt-linux-gcc" 2>/dev/null | head -n 1)
 if [ -z "$GCC_CHECK" ]; then
     echo "::error::[PRE-BUILD GAGAL] Cross-compiler aarch64 belum ter-compile atau tidak ditemukan di staging_dir!"
@@ -38,10 +34,7 @@ else
 fi
 
 if [ "$ERR" -ne 0 ]; then
-    echo ""
-    echo "************************************************************************"
-    echo "   BUILD HENTI SEKETIKA: ADA SYARAT HARDWARE / TOOLCHAIN YANG GAGAL    "
-    echo "************************************************************************"
+    echo "::error::Pre-flight gagal! Menghentikan workflow."
     exit 1
 fi
 
