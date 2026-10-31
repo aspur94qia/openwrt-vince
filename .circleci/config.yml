@@ -4,7 +4,7 @@ executors:
   openwrt-builder:
     docker:
       - image: cimg/base:2024.01
-    resource_class: large # Menggunakan 8 vCPU & 32 GB RAM
+    resource_class: large # 8 vCPU & 32 GB RAM
 
 jobs:
   build:
