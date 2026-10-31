@@ -6,8 +6,9 @@ LOG="$LOGDIR/build.log"
 touch "$LOG"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-JOBS=$(nproc)
-echo "Menjalankan Build Firmware Utama dengan $JOBS threads..."
+# Menggunakan (nproc + 1) untuk memaksimalkan 4 vCPU AMD EPYC
+JOBS=$(($(nproc) + 1))
+echo "Menjalankan Build Firmware Utama High-Speed dengan $JOBS threads..."
 
 make -j"$JOBS" 2>&1 \vert{} tee "$LOG" | grep --line-buffered -E '^make[[0-9]]: (Entering|\*\*\*)|ERROR:| error:' | cut -c1-200
 rc=${PIPESTATUS[0]}

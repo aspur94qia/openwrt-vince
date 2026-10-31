@@ -12,6 +12,8 @@ env:
   FORCE_UNSAFE_CONFIGURE: 1
   FORK_URL: https://github.com/lkiuyu/immortalwrt
   FORK_BRANCH: master
+  CCACHE_DIR: /tmp/.ccache
+  CCACHE_MAXSIZE: 10G
 
 defaults:
   run:
@@ -22,18 +24,12 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     steps:
-      - name: Free Host Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell
-          echo "Disk Space Tersedia:"
-          df -h "$GITHUB_WORKSPACE"
-
-      - name: Install Build Dependencies
+      - name: Install Build Dependencies Fast
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential ccache ecj fastjar file g++ gawk gettext git autopoint \
           autoconf automake libtool gperf help2man intltool patch pkgconf bzip2 xz-utils \
           libelf-dev libdw-dev libncurses-dev libssl-dev libglib2.0-dev libgmp3-dev libmpc-dev \
           libmpfr-dev libreadline-dev libltdl-dev python3 python3-distutils python3-setuptools \
@@ -44,21 +40,23 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Init Logs
-        run: mkdir -p "$GITHUB_WORKSPACE/ci-logs"
+      - name: Init Logs & RAM Ccache Dir
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/ci-logs"
+          mkdir -p /tmp/.ccache
 
       - name: Clone OpenWrt Fork (Fast Shallow Clone)
         run: |
           rm -rf openwrt
           git clone --depth 1 --filter=blob:none -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
-      - name: Cache OpenWrt DL & Ccache
+      - name: Cache OpenWrt DL & RAM Ccache
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
-            openwrt/.ccache
-          key: openwrt-vince-dl-${{ runner.os }}
+            /tmp/.ccache
+          key: openwrt-vince-dl-ccache-v21-${{ runner.os }}
 
       - name: Apply Overlay & Scaffold Subtarget Vince
         run: |
@@ -68,7 +66,7 @@ jobs:
           fi
           bash ci/scaffold-msm8953.sh openwrt
 
-      - name: Inject Configuration & Lock Target MSM89xx
+      - name: Inject Configuration (Optimized Fast-Path)
         run: |
           cd openwrt
           cat << 'CONFIG_EOF' > .config
@@ -77,6 +75,8 @@ jobs:
           CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
+          CONFIG_PARALLEL_BUILDING=y
+          CONFIG_TOOLCHAINOPTS=y
           CONFIG_AUTOREMOVE=y
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-compat=y
@@ -131,27 +131,26 @@ jobs:
           CUSTOM_EOF
           chmod +x files/etc/uci-defaults/99-vince-custom
 
-      - name: Download Sources Fast
+      - name: Download Sources Fast Parallel
         run: |
           cd openwrt
-          make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
+          JOBS=$(($(nproc) + 1))
+          make download -j"$JOBS" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      # TAHAP ULTRAFAST: Unduh Host Tools & Toolchain Binary Pra-Kompilasi (Bukan Compile)
-      - name: Setup Fast Pre-built Tools & Toolchain
+      - name: Setup Pre-built Tools & Toolchain Fast
         run: |
           cd openwrt
-          make tools/install -j"$(nproc)" BUILD_TOOLCHAIN=0 || true
+          JOBS=$(($(nproc) + 1))
+          make tools/install -j"$JOBS" BUILD_TOOLCHAIN=0 || true
           
-          # Jika staging_dir belum punya toolchain gcc, buat symlink/download instan
           if ! find staging_dir/toolchain-* -name "*gcc" 2>/dev/null | grep -q .; then
-            echo "Menyiapkan Fast Toolchain..."
-            make toolchain/install -j"$(nproc)" IGNORE_ERRORS=m || true
+            make toolchain/install -j"$JOBS" IGNORE_ERRORS=m || true
           fi
 
       - name: Pengecekan Pra-Build Total (Pre-flight Check)
         run: bash ci/inspect-preflight.sh openwrt
 
-      - name: Build Firmware (Single Pass 1x Jalan)
+      - name: Build Firmware (High-Speed Single Pass)
         run: bash ci/build.sh openwrt
 
       - name: Package Flash Files
