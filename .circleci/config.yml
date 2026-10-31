@@ -42,23 +42,21 @@ jobs:
           name: Inject Configuration
           command: |
             cd openwrt
-            cat << 'CONFIG_EOF' > .config
-            CONFIG_TARGET_msm89xx=y
-            CONFIG_TARGET_msm89xx_msm8953=y
-            CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y
-            CONFIG_DEVEL=y
-            CONFIG_CCACHE=y
-            CONFIG_PARALLEL_BUILDING=y
-            CONFIG_TOOLCHAINOPTS=y
-            CONFIG_AUTOREMOVE=y
-            CONFIG_PACKAGE_luci=y
-            CONFIG_PACKAGE_luci-compat=y
-            CONFIG_PACKAGE_dropbear=y
-            CONFIG_PACKAGE_kmod-wcn36xx=y
-            CONFIG_PACKAGE_kmod-usb-gadget-eth=y
-            CONFIG_PACKAGE_zram-swap=y
-            CONFIG_PACKAGE_luci-app-ttyd=y
-            CONFIG_EOF
+            echo "CONFIG_TARGET_msm89xx=y" > .config
+            echo "CONFIG_TARGET_msm89xx_msm8953=y" >> .config
+            echo "CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y" >> .config
+            echo "CONFIG_DEVEL=y" >> .config
+            echo "CONFIG_CCACHE=y" >> .config
+            echo "CONFIG_PARALLEL_BUILDING=y" >> .config
+            echo "CONFIG_TOOLCHAINOPTS=y" >> .config
+            echo "CONFIG_AUTOREMOVE=y" >> .config
+            echo "CONFIG_PACKAGE_luci=y" >> .config
+            echo "CONFIG_PACKAGE_luci-compat=y" >> .config
+            echo "CONFIG_PACKAGE_dropbear=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-usb-gadget-eth=y" >> .config
+            echo "CONFIG_PACKAGE_zram-swap=y" >> .config
+            echo "CONFIG_PACKAGE_luci-app-ttyd=y" >> .config
             make defconfig
 
       - run:
