@@ -4,14 +4,14 @@ executors:
   spec-checker:
     docker:
       - image: cimg/base:2024.01
-    resource_class: large # Target 8 vCPU & 32 GB RAM
+    resource_class: large # 8 vCPU & 32 GB RAM
 
 jobs:
   check-spec:
     executor: spec-checker
     steps:
       - run:
-          name: Cek Spesifikasi Hardware
+          name: Cek Spesifikasi Hardware CircleCI
           command: |
             echo "=================== CPU INFO ==================="
             lscpu | grep -E "Model name|CPU\(s\):|Thread|Core|Socket|MHz"
