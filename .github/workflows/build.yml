@@ -115,15 +115,18 @@ jobs:
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
 
-      - name: Pengecekan Pra-Build (Pre-flight Check)
-        run: bash ci/inspect-preflight.sh openwrt
-
+      # TAHAP 1: BUILD CROSS-COMPILER DULUAN
       - name: Build Host Tools & Toolchain (Cross-Compiler Setup)
         run: |
           cd openwrt
           make tools/install -j"$(nproc)"
           make toolchain/install -j"$(nproc)"
 
+      # TAHAP 2: PENGECEKAN PRA-BUILD TOTAL (Dilakukan SETELAH Toolchain Jadi, Tepat Sebelum Build ROM)
+      - name: Pengecekan Pra-Build Total (Pre-flight Check)
+        run: bash ci/inspect-preflight.sh openwrt
+
+      # TAHAP 3: BUILD FIRMWARE ROM UTAMA
       - name: Build Firmware (Single Pass 1x Jalan)
         run: bash ci/build.sh openwrt
 
