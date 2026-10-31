@@ -1,7 +1,9 @@
 #!/bin/bash
 cd "${1:-openwrt}" || exit 1
-LOGDIR="$GITHUB_WORKSPACE/ci-logs"; mkdir -p "$LOGDIR"
+LOGDIR="${GITHUB_WORKSPACE:-/tmp}/ci-logs"
+mkdir -p "$LOGDIR"
 LOG="$LOGDIR/build.log"
+touch "$LOG"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 JOBS=$(nproc)
