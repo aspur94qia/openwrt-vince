@@ -55,7 +55,6 @@ jobs:
           rm -rf openwrt
           git clone --depth 1 --filter=blob:none -b "$FORK_BRANCH" "$FORK_URL" openwrt
 
-      # CACHE UTAMA: Menyimpan file unduhan (dl), ccache, dan tools
       - name: Cache OpenWrt DL & Tools
         uses: actions/cache@v4
         with:
@@ -96,10 +95,6 @@ jobs:
 
           make defconfig
 
-      # PENGECEKAN PRA-BUILD KETAT KHUSUS REDMI 5 PLUS (BERHENTI DI SINI JIKA GAGAL)
-      - name: Pengecekan Pra-Build (Pre-flight Check)
-        run: bash ci/inspect-preflight.sh openwrt
-
       - name: Update Feeds & Install Core Packages
         run: |
           cd openwrt
@@ -119,6 +114,10 @@ jobs:
         run: |
           cd openwrt
           make download -j"$(nproc)" WGET="wget --user-agent='Mozilla/5.0'" || make download -j1 V=s
+
+      # UJI PRA-BUILD REAL (Akan HENTIKAN Workflow di Menit ke-2 jika Kompilasi C Kernel Bermasalah)
+      - name: Uji Pra-Build & Test Kompilasi Kernel
+        run: bash ci/inspect-preflight.sh openwrt
 
       - name: Build Firmware (Single Pass 1x Jalan)
         run: bash ci/build.sh openwrt

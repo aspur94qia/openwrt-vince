@@ -5,15 +5,15 @@ LOG="$LOGDIR/build.log"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 JOBS=$(nproc)
-echo "Menjalankan Build Single Pass (1x Jalan) dengan $JOBS threads..."
+echo "Menjalankan Build Firmware Utama dengan $JOBS threads..."
 
-make -j"$JOBS" 2>&1 | tee "$LOG" | grep --line-buffered -E '^make\[[0-9]\]: (Entering|\*\*\*)|ERROR:| error:' | cut -c1-200
+make -j"$JOBS" 2>&1 \vert{} tee "$LOG" | grep --line-buffered -E '^make[[0-9]]: (Entering|\*\*\*)|ERROR:| error:' | cut -c1-200
 rc=${PIPESTATUS[0]}
 
 if [ "$rc" -ne 0 ]; then
   {
     echo "### Build Firmware Gagal (Exit Code $rc)"
-    echo '```'
+    echo '```text'
     grep -nE 'error:|Error [0-9]+|\*\*\* |ERROR:' "$LOG" | tail -n 40 | cut -c1-300
     echo '```'
   } >> "$SUMMARY"

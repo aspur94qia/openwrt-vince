@@ -1,46 +1,44 @@
 #!/bin/bash
 cd "${1:-openwrt}" || exit 1
-echo "========================================================="
-echo "=== MEMULAI PENGECEKAN PRA-BUILD KETAT (REDMI 5 PLUS) ==="
-echo "========================================================="
+echo "================================================================="
+echo "=== PENGECEKAN PRA-BUILD KETAT & TEST KOMPILASI (REDMI 5 PLUS) ==="
+echo "================================================================="
 ERR=0
 
-# 1. Cek Subtarget MSM8953
+# 1. Cek Fisik Subtarget msm8953
 if [ ! -d "target/linux/msm89xx/msm8953" ]; then
-    echo "::error::[PRA-BUILD GAGAL] Subtarget target/linux/msm89xx/msm8953 TIDAK DITEMUKAN! Porting kernel msm8953 belum siap."
+    echo "::error::[PRA-BUILD GAGAL] Subtarget target/linux/msm89xx/msm8953 TIDAK DITEMUKAN!"
     ERR=1
 fi
 
-# 2. Cek Registrasi Device xiaomi_vince
+# 2. Cek Device xiaomi_vince di Makefile
 if ! grep -rq 'xiaomi_vince' target/linux/msm89xx/image/; then
-    echo "::error::[PRA-BUILD GAGAL] Device 'xiaomi_vince' TIDAK TERDAFTAR di target/linux/msm89xx/image/! Image firmware tidak akan terbentuk."
+    echo "::error::[PRA-BUILD GAGAL] Device 'xiaomi_vince' TIDAK TERDAFTAR di target/linux/msm89xx/image/!"
     ERR=1
 fi
 
-# 3. Cek Keberadaan DTS Vince (msm8953-xiaomi-vince.dts)
-DTS_EXISTS=$(find target/linux/msm89xx/ -name "*msm8953-xiaomi-vince*.dts" 2>/dev/null)
-if [ -z "$DTS_EXISTS" ]; then
-    echo "::warning::[PERINGATAN DTS] File msm8953-xiaomi-vince.dts tidak ditemukan di target tree OpenWrt. Memastikan ketersediaan di kernel tree..."
-fi
-
-# 4. Verifikasi Konfigurasi (.config) Khusus Vince
-if ! grep -q '^CONFIG_TARGET_msm89xx=y' .config; then
-    echo "::error::[PRA-BUILD GAGAL] Target msm89xx tidak terpilih di file .config!"
-    ERR=1
-fi
-
-if ! grep -q '^CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y' .config; then
-    echo "::error::[PRA-BUILD GAGAL] Device Redmi 5 Plus (xiaomi_vince) tidak aktif di file .config!"
+# 3. Verifikasi Target di .config
+if ! grep -q '^CONFIG_TARGET_msm89xx=y' .config || ! grep -q '^CONFIG_TARGET_msm89xx_msm8953_DEVICE_xiaomi_vince=y' .config; then
+    echo "::error::[PRA-BUILD GAGAL] Target atau Device Vince tidak terkunci di .config!"
     ERR=1
 fi
 
 if [ "$ERR" -ne 0 ]; then
-    echo ""
-    echo "************************************************************************"
-    echo "   BUILD DIHENTIKAN: PERANGKAT ATAU CONFIG TIDAK SESUAI REDMI 5 PLUS    "
-    echo "   Silakan periksa pesan error di atas sebelum melakukan build ulang.   "
-    echo "************************************************************************"
+    echo "::error::Pre-flight awal gagal! Menghentikan workflow."
     exit 1
 fi
 
-echo "::notice::[PRA-BUILD SUKSES] Seluruh syarat konfigurasi Xiaomi Redmi 5 Plus (Vince) TERVERIFIKASI!"
+# 4. SIMULASI & TES KOMPILASI KERNEL TARGET (Pengecekan Nyata Kode C Kernel)
+echo "::notice::Menjalankan uji kompilasi kernel target/linux..."
+make target/linux/compile -j"$(nproc)" V=s > preflight-kernel.log 2>&1
+K_RC=${PIPESTATUS[0]}
+
+if [ "$K_RC" -ne 0 ]; then
+    echo "::error::[PRA-BUILD GAGAL] Kompilasi C kernel target/linux BERMASALAH! Ada kode/patch yang crash."
+    echo "------------------ DETAIL ERROR KERNEL ------------------"
+    grep -nE 'error:|Error [0-9]+|\*\*\* |ERROR:' preflight-kernel.log | tail -n 30
+    echo "--------------------------------------------------------"
+    exit 1
+fi
+
+echo "::notice::[PRA-BUILD SUKSES 100%] Uji kompilasi kernel lulus! Aman untuk melanjutkan build firmware."

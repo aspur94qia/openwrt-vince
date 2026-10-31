@@ -1,17 +1,16 @@
 #!/bin/bash
 cd "${1:-openwrt}" || exit 1
 T=target/linux/msm89xx
-[ -d "$T" ] || { echo "::error::[PRE-BUILD GAGAL] Direktori $T tidak ditemukan di fork ini!"; exit 1; }
+[ -d "$T" ] \vert{}\vert{} { echo "::error::[PRE-BUILD GAGAL] Direktori $T tidak ditemukan di fork ini!"; exit 1; }
 
 REF=""
 for c in msm8916 msm8909 msm8939; do
   if [ -d "$T/$c" ]; then REF=$c; break; fi
 done
-[ -n "$REF" ] || { echo "::error::[PRE-BUILD GAGAL] Tidak ditemukan subtarget acuan (msm8916/8909/8939) di $T!"; exit 1; }
+[ -n "$REF" ] || { echo "::error::[PRE-BUILD GAGAL] Tidak ditemukan subtarget acuan di $T!"; exit 1; }
 REFU=$(echo "$REF" | tr 'a-z' 'A-Z')
 export REF
 
-# 1. Daftarkan subtarget di Makefile target
 if ! grep -qE '^SUBTARGETS[[:space:]]*:?=.*msm8953' "$T/Makefile"; then
   if grep -qE '^SUBTARGETS.*\\$' "$T/Makefile"; then
     echo "::warning::SUBTARGETS multi-baris, tambahkan msm8953 manual lewat overlay"
@@ -20,16 +19,14 @@ if ! grep -qE '^SUBTARGETS[[:space:]]*:?=.*msm8953' "$T/Makefile"; then
   fi
 fi
 
-# 2. Salin subtarget acuan
 if [ ! -d "$T/msm8953" ]; then
   cp -a "$T/$REF" "$T/msm8953"
   grep -rIl -e "$REF" -e "$REFU" "$T/msm8953" 2>/dev/null | xargs -r sed -i "s/$REF/msm8953/g; s/$REFU/MSM8953/g"
   find "$T/msm8953" -depth -name "*$REF*" | while read -r f; do
-    mv "$f" "$(dirname "$f")/$(basename "$f" | sed "s/$REF/msm8953/g")"
+    mv "$f" "$(dirname "$f")/$(basename "$f" \vert{} sed "s/$REF/msm8953/g")"
   done
 fi
 
-# 3. Config kernel tambahan MSM8953
 if ! grep -q 'CONFIG_PINCTRL_MSM8953' "$T/msm8953/config-default" 2>/dev/null; then
   touch "$T/msm8953/config-default"
   cat >> "$T/msm8953/config-default" << 'KCFG'
@@ -63,7 +60,6 @@ CONFIG_POWER_RESET_MSM=y
 KCFG
 fi
 
-# 4. Definisi device xiaomi_vince
 python3 - << 'PY'
 import glob, os, re, sys
 ref = os.environ['REF']
@@ -130,6 +126,5 @@ else:
         f.write(s)
 PY
 rc=$?
-[ $rc -eq 0 ] || exit $rc
-
+[ $rc -eq 0 ] \vert{}\vert{} exit$rc
 echo "Scaffold subtarget & device selesai."
